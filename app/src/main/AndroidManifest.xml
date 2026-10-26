@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- ===== 高德地图/定位/导航所需权限 ===== -->
+    <!-- 网络：路线规划 / 导航算路 / 瓦片下载 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- 定位：粗略 + 精确定位（车头跟随必需精确），Android10+ 后台定位（导航持续定位） -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- 高德定位辅助：基站 / 设备标识辅助定位（历史版本 SDK 建议声明） -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- 存储：旧版本导航 SDK 离线资源 / 缓存需要；Android10+ 不再授予，加 maxSdkVersion 上限 -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- OOTD 相机拍照：运行时动态申请，仅拍照选图时使用 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- 拍照不强制要求设备具备摄像头（无摄像头设备安装不失败，实际拍照前会做权限判断） -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
+    <application
+        android:usesCleartextTraffic="true"
+        android:name=".CityGoApplication"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:hardwareAccelerated="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.CityGo"
+        android:networkSecurityConfig="@xml/network_security_config">
+
+        <!-- 高德 Android Key：由 amap.properties 经 manifestPlaceholders 注入 -->
+        <meta-data
+            android:name="com.amap.api.v2.apikey"
+            android:value="${AMAP_ANDROID_KEY}" />
+
+        <!-- 高德定位服务 -->
+        <service android:name="com.amap.api.location.APSService" />
+
+        <!-- OOTD 拍照分享：通过 FileProvider 把应用私有图片临时授权给相机 / 相册 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!--
+            configChanges：配置变化（旋转/尺寸/UI模式等）时不重建 Activity，
+            避免高德地图 Surface/纹理上下文随 Activity 重建丢失导致黑屏；
+            页面状态由 Compose 自身保存恢复。
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|uiMode|keyboardHidden|keyboard|navigation|fontScale|density|layoutDirection|locale"
+            android:exported="true"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.CityGo">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 唯一正式入口为 MainActivity；行程配置使用计划页内的 Compose 弹窗。 -->
+    </application>
+
+</manifest>

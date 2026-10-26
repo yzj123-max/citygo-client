@@ -1,0 +1,40 @@
+/* 全局基础样式：移动端优先，统一盒模型、字体与背景 */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', Arial, sans-serif;
+  font-size: 15px;
+  color: #24303f;
+  background: #f4f6f8;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+/* Element Plus 在移动端的触控优化：输入框 / 按钮最小高度更适合手指点击 */
+.el-button {
+  font-weight: 500;
+}
+
+/* 隐藏原生 file input 的兜底样式（hidden 属性已生效，此处仅兼容旧 WebView） */
+input[type='file'][hidden] {
+  display: none;
+}

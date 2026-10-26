@@ -1,0 +1,176 @@
+<resources>
+    <string name="app_name">智旅方途</string>
+
+    <!-- ==================== 账号模块（登录 / 注册 / 个人信息） ==================== -->
+    <!-- 页面标题 -->
+    <string name="auth_title_login">登录</string>
+    <string name="auth_title_register">注册</string>
+    <string name="auth_title_user_info">个人信息</string>
+
+    <!-- 登录页 -->
+    <string name="auth_welcome">欢迎回来</string>
+    <string name="auth_tab_password">密码登录</string>
+    <string name="auth_tab_code">验证码登录</string>
+    <string name="auth_phone">手机号</string>
+    <string name="auth_phone_hint">11 位手机号</string>
+    <string name="auth_password">密码</string>
+    <string name="auth_password_hint">请输入密码</string>
+    <string name="auth_code">验证码</string>
+    <string name="auth_code_hint">6 位数字验证码</string>
+    <string name="auth_get_code">获取验证码</string>
+    <!-- 发送中 / 倒计时按钮文案（%1$d 为剩余秒数） -->
+    <string name="auth_code_sending">发送中…</string>
+    <string name="auth_code_resend">%1$ds 后重发</string>
+    <string name="auth_btn_login">登录</string>
+    <string name="auth_btn_register">注册</string>
+    <string name="auth_go_register">没有账号？去注册</string>
+
+    <!-- 注册页 -->
+    <string name="auth_create_account">创建账号</string>
+    <string name="auth_register_pwd_hint">请设置密码</string>
+
+    <!-- 个人信息页 -->
+    <string name="auth_loading_info">正在加载用户信息…</string>
+    <string name="auth_info_failed">用户信息加载失败，请稍后重试</string>
+    <string name="auth_reload">重新加载</string>
+    <string name="auth_enter_app">进入首页</string>
+    <string name="auth_logout">退出登录</string>
+    <!-- 退出登录确认弹窗 -->
+    <string name="auth_logout_dialog_title">退出登录</string>
+    <string name="auth_logout_dialog_message">确定要退出登录吗？</string>
+    <string name="auth_cancel">取消</string>
+    <string name="auth_confirm">确定</string>
+    <string name="auth_logout_failed_default">退出登录失败，请稍后重试</string>
+    <string name="auth_user_id">用户 ID</string>
+    <string name="auth_label_phone">手机号</string>
+    <string name="auth_placeholder_dash">-</string>
+
+    <!-- 校验 / 结果提示（ViewModel 与页面共用） -->
+    <string name="auth_register_success_default">注册成功，请登录</string>
+    <string name="auth_register_failed_default">注册失败</string>
+    <string name="auth_phone_invalid">请输入正确的 11 位手机号</string>
+    <string name="auth_code_invalid">请输入 6 位数字验证码</string>
+    <string name="auth_password_empty">密码不能为空</string>
+    <string name="auth_login_success">登录成功</string>
+    <string name="auth_login_failed_default">登录失败</string>
+    <string name="auth_code_sent_default">验证码已发送</string>
+    <string name="auth_code_send_failed_default">验证码发送失败</string>
+    <!-- 网络异常统一提示（断网 / 超时 / 连不上服务 / HTTP 错误） -->
+    <string name="auth_network_error">网络请求失败，请检查服务</string>
+    <string name="auth_info_network_failed">登录成功，但资料暂时拉取失败，请检查网络后重试</string>
+    <string name="auth_token_expired">登录状态已过期，请重新登录</string>
+    <string name="auth_userinfo_failed_default">获取用户信息失败</string>
+
+    <!-- 通用无障碍描述 -->
+    <string name="auth_back">返回</string>
+    <string name="auth_password_show">显示密码</string>
+    <string name="auth_password_hide">隐藏密码</string>
+
+    <!-- ==================== 设置页（参考小红书深色风格） ==================== -->
+    <string name="settings_title">设置</string>
+    <!-- 常规设置项（当前为占位入口） -->
+    <string name="settings_storage">存储空间</string>
+    <string name="settings_preference">内容偏好调节</string>
+    <string name="settings_widget">添加小组件</string>
+    <string name="settings_minor">未成年人模式</string>
+    <string name="settings_new_feature">新功能体验</string>
+    <string name="settings_help">帮助与客服</string>
+    <!-- 底部固定按钮 -->
+    <string name="settings_switch_account">切换账号</string>
+    <string name="settings_logout">退出登录</string>
+    <!-- 底部协议小字 -->
+    <string name="settings_agreement">《用户协议》　《隐私政策》　《社区规范》</string>
+    <!-- 退出登录弹窗 / Toast -->
+    <string name="settings_logout_confirm_message">确定要退出登录吗？</string>
+    <string name="settings_logout_success">退出登录成功</string>
+    <string name="settings_logout_failed">退出登录失败，请稍后重试</string>
+    <string name="settings_coming_soon">功能开发中，敬请期待</string>
+
+    <!-- ==================== 切换账号页（小红书风格多账号） ==================== -->
+    <string name="switch_account_title">切换账号</string>
+    <string name="switch_account_add">添加账号</string>
+    <string name="switch_account_active">当前账号</string>
+    <string name="switch_account_footer_tip">添加账号后，可在本设备支持账号切换</string>
+    <!-- %1$s 为切换后的账号昵称 -->
+    <string name="switch_account_done">已切换到 %1$s</string>
+    <!-- 切换时旧账号 /logout 网络异常：仍完成本地切换的提示；%1$s 为新账号昵称 -->
+    <string name="switch_account_logout_network_failed">旧账号退出请求失败，已在本地切换到 %1$s</string>
+    <string name="switch_account_switching">切换中…</string>
+    <!-- 长按删除本地账号记录 -->
+    <string name="switch_account_delete_title">移除账号</string>
+    <!-- %1$s 为手机号 -->
+    <string name="switch_account_delete_message">将从本设备移除账号 %1$s 的登录记录，确定移除吗？</string>
+    <string name="switch_account_delete_confirm">移除</string>
+    <string name="switch_account_delete_cancel">取消</string>
+    <string name="switch_account_delete_done">账号已移除</string>
+    <string name="switch_account_delete_current_done">当前账号已移除，请重新登录</string>
+    <!-- 本地记录 token 为空：需重新登录该账号 -->
+    <string name="switch_account_need_relogin">该账号登录已过期，请重新登录</string>
+    <!-- 账号行尾提示，%1$s 为手机号 -->
+    <string name="switch_account_relogin_suffix">%1$s 登录已过期，点击去登录</string>
+    <!-- 切换账号底部弹窗底部说明 -->
+    <string name="switch_account_sheet_tip">添加账号后，可在本设备快速切换账号</string>
+    <!-- 切换账号时拉取 /info 网络异常（本地 token 已切换） -->
+    <string name="switch_account_info_network_failed">已切换账号，但资料暂时无法更新，请检查网络后重试</string>
+    <!-- 退出登录：/logout 网络异常但本地已清除 -->
+    <string name="switch_account_logout_network_local">网络异常，已在本地退出登录</string>
+
+    <!-- ==================== 用户资料主页 / 编辑资料页 ==================== -->
+    <string name="user_profile_title">个人资料</string>
+    <string name="user_profile_edit_button">编辑资料</string>
+    <string name="user_profile_loading">资料加载中…</string>
+    <string name="user_profile_avatar">头像</string>
+    <string name="user_profile_avatar_change">更换头像</string>
+    <string name="user_profile_avatar_uploading">头像上传中…</string>
+    <string name="user_profile_avatar_success">头像更新成功</string>
+    <string name="user_profile_avatar_failed">头像上传失败，请稍后重试</string>
+    <string name="user_profile_avatar_upload_failed">头像上传失败，请稍后重试</string>
+    <!-- 低版本系统拒绝相册存储权限时的引导 -->
+    <string name="avatar_permission_denied">需要存储权限才能选择头像，请在系统设置中开启后重试</string>
+    <string name="user_profile_load_failed">资料获取失败，请稍后重试</string>
+    <string name="user_profile_save_success">资料保存成功</string>
+    <string name="user_profile_save_failed">资料保存失败，请稍后重试</string>
+    <string name="user_profile_nickname_required">昵称不能为空</string>
+    <string name="user_profile_nickname_placeholder">未设置昵称</string>
+    <string name="user_profile_phone_placeholder">未绑定手机号</string>
+    <string name="user_profile_desc_placeholder">这个人很懒，还没有填写简介</string>
+    <string name="user_profile_section_desc">个人简介</string>
+    <string name="user_profile_field_nickname">昵称</string>
+    <string name="user_profile_field_desc">个人简介</string>
+    <string name="user_profile_field_gender">性别</string>
+    <string name="user_profile_field_birthday">生日</string>
+    <string name="user_profile_field_region">地区</string>
+    <string name="user_profile_field_job">职业</string>
+    <string name="user_profile_field_school">学校</string>
+    <string name="edit_profile_title">编辑资料</string>
+    <string name="edit_profile_avatar_tip">点击头像更换（单独上传）</string>
+    <string name="edit_profile_save">保存</string>
+    <string name="edit_profile_saving">保存中…</string>
+    <string name="edit_profile_gender_male">男</string>
+    <string name="edit_profile_gender_female">女</string>
+    <string name="edit_profile_gender_none">不设置</string>
+    <string name="edit_profile_date_confirm">确定</string>
+    <string name="edit_profile_birthday_placeholder">请选择生日</string>
+    <string name="edit_profile_birthday_clear">清除生日</string>
+    <!-- %1$s 为字段名 -->
+    <string name="edit_profile_field_placeholder">请输入%1$s</string>
+
+    <!-- ==================== 完善资料页（新注册用户） ==================== -->
+    <string name="complete_profile_title">完善资料</string>
+    <string name="complete_profile_subtitle">完善资料后开始使用智旅方途</string>
+    <string name="complete_profile_avatar">点击选择头像</string>
+    <string name="complete_profile_nickname_label">昵称</string>
+    <string name="complete_profile_nickname_hint">请输入昵称（必填）</string>
+    <string name="complete_profile_nickname_required">昵称不能为空</string>
+    <string name="complete_profile_gender_label">性别</string>
+    <string name="complete_profile_gender_male">男</string>
+    <string name="complete_profile_gender_female">女</string>
+    <string name="complete_profile_gender_none">不设置</string>
+    <string name="complete_profile_birthday_label">生日</string>
+    <string name="complete_profile_birthday_hint">请选择生日</string>
+    <string name="complete_profile_submit">提交</string>
+    <string name="complete_profile_submitting">提交中…</string>
+    <string name="complete_profile_save_success">资料保存成功</string>
+    <string name="complete_profile_save_failed">资料保存失败，请稍后重试</string>
+    <string name="complete_profile_session_missing">登录态失效，请重新登录</string>
+</resources>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"
+?>
+<!--
+  FileProvider 可分享路径配置（OOTD 相机拍照临时图片）。
+  仅暴露应用外部私有目录，相册 / 相机通过临时 Uri 授权访问，无需存储权限。
+-->
+<paths>
+    <!-- 相机拍照输出：context.getExternalFilesDir(Pictures) 下的图片 -->
+    <external-files-path
+        name="ootd_images"
+        path="." />
+    <!-- 压缩过程中写入缓存目录的临时文件 -->
+    <cache-path
+        name="ootd_cache"
+        path="." />
+</paths>

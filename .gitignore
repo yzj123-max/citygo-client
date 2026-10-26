@@ -1,0 +1,50 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+# 高德 Key 等本地密钥配置不入库
+amap.properties
+
+# 本机旧入口回退备份可能含历史配置，不提交。
+/build_tmp/legacy-entry-backup-*.zip
+/build_tmp/account-isolation-backup-*.zip
+/build_tmp/trip-sync-backup-*.zip
+
+# Local caches, generated output, and recovery copies
+**/node_modules/
+**/dist/
+**/build/
+**/target/
+/.kotlin/
+/.idea/
+/.trae/
+/build_tmp/
+/ui-redesign-backup/
+*.log
+__pycache__/
+
+# Credentials and local runtime data
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.db
+*.db-shm
+*.db-wal

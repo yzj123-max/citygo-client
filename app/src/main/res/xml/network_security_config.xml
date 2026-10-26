@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  网络安全配置（调试用）：仅对下列调试地址放行明文 HTTP，其余地址仍走默认 HTTPS 策略。
+
+  1) 172.20.10.2 —— 局域网真机联调：电脑 IPv4，SpringBoot 后端监听 0.0.0.0:8080，
+     Retrofit 默认 baseUrl = http://172.20.10.2:8080/（见 ServerConfig.DEBUG_BASE_URL）。
+  2) 127.0.0.1  —— 保留，兼容 adb reverse（adb reverse tcp:8080 tcp:8080）USB 调试；
+     切回该模式时把 ServerConfig.updateBaseUrl("http://127.0.0.1:8080/") 即可。
+
+  后续若改用其它局域网 IP / 域名，需在此同步新增域名并重新打包。
+
+  3) OOTD 副页面采用「电脑局域网 IP」真机联调（手机与电脑同一 WiFi）：
+     不同电脑 / 热点的 IPv4 不固定，故下方增加 base-config 对调试期所有地址放行明文 HTTP；
+     仅用于毕设联调，正式上线应改 HTTPS 并收紧本配置。
+-->
+<network-security-config>
+    <!-- 调试期默认放行明文 HTTP：覆盖任意局域网 IP（OOTD 页填写电脑 IPv4 即可，无需改本文件） -->
+    <base-config cleartextTrafficPermitted="true" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">172.20.10.2</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>
