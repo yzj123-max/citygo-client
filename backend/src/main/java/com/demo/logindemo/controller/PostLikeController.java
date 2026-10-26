@@ -1,0 +1,85 @@
+package com.demo.logindemo.controller;
+
+import com.demo.logindemo.dto.PostLikeResp;
+import com.demo.logindemo.entity.Result;
+import com.demo.logindemo.service.PostLikeService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
+@RestController
+@RequestMapping("/api/posts")
+public class PostLikeController {
+
+    private static final Logger log =
+            LoggerFactory.getLogger(PostLikeController.class);
+
+    private final PostLikeService likeService;
+
+    public PostLikeController(PostLikeService likeService) {
+        this.likeService = likeService;
+    }
+
+    @PutMapping("/{postId}/like")
+    public ResponseEntity<Result<PostLikeResp>> like(
+            @RequestAttribute("userId") Long currentUserId,
+            @PathVariable("postId") Long postId
+    ) {
+        return handle(currentUserId, postId, true);
+    }
+
+    @DeleteMapping("/{postId}/like")
+    public ResponseEntity<Result<PostLikeResp>> unlike(
+            @RequestAttribute("userId") Long currentUserId,
+            @PathVariable("postId") Long postId
+    ) {
+        return handle(currentUserId, postId, false);
+    }
+
+    private ResponseEntity<Result<PostLikeResp>> handle(
+            Long currentUserId,
+            Long postId,
+            boolean wantLiked
+    ) {
+        try {
+            PostLikeResp data = wantLiked
+                    ? likeService.like(currentUserId, postId)
+                    : likeService.unlike(currentUserId, postId);
+
+            return ResponseEntity.ok(Result.success(data));
+
+        } catch (ResponseStatusException e) {
+            Result<PostLikeResp> result = Result.fail(
+                    e.getReason() == null ? "请求失败" : e.getReason()
+            );
+            result.setCode(e.getStatusCode().value());
+
+            return ResponseEntity.status(e.getStatusCode()).body(result);
+
+        } catch (Exception e) {
+            log.error(
+                    "点赞操作失败，userId={}，postId={}，wantLiked={}",
+                    currentUserId,
+                    postId,
+                    wantLiked,
+                    e
+            );
+
+            Result<PostLikeResp> result =
+                    Result.fail("操作失败，请查看后端日志");
+            result.setCode(500);
+
+            return ResponseEntity.status(
+                    HttpStatus.INTERNAL_SERVER_ERROR
+            ).body(result);
+        }
+    }
+}
