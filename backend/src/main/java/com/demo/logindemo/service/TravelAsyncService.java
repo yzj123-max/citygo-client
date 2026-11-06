@@ -29,13 +29,13 @@ public class TravelAsyncService {
         }
         try {
             String planText = travelPlanService.getPlan(param);
-            task.setStatus("SUCCESS");
             task.setResult(planText);
+            task.setStatus("SUCCESS");
             log.info("taskId={} 生成成功", taskId);
         } catch (Exception e) {
             log.error("taskId={} 生成失败", taskId, e);
-            task.setStatus("FAIL");
             task.setErrorMsg(e.getMessage());
+            task.setStatus("FAIL");
         }
     }
 }

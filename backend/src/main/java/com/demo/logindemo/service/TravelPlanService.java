@@ -36,6 +36,7 @@ public class TravelPlanService {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final TravelAsyncService travelAsyncService;
+    private final AmapMcpTravelPlanner amapMcpTravelPlanner;
 
     // ===== 成员变量：两个mapper =====
     private final RestaurantMapper restaurantMapper;
@@ -45,19 +46,20 @@ public class TravelPlanService {
     public TravelPlanService(RestTemplate restTemplate,
                              TravelAsyncService travelAsyncService,
                              RestaurantMapper restaurantMapper,
-                             AttractionMapper attractionMapper) {
+                             AttractionMapper attractionMapper,
+                             AmapMcpTravelPlanner amapMcpTravelPlanner) {
         this.restTemplate = restTemplate;
         this.travelAsyncService = travelAsyncService;
         this.restaurantMapper = restaurantMapper;
         this.attractionMapper = attractionMapper;
+        this.amapMcpTravelPlanner = amapMcpTravelPlanner;
     }
 
     // 内存任务缓存
-    public static final ConcurrentHashMap<String, TaskDTO> taskMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, TaskDTO> taskMap = new ConcurrentHashMap<>();
 
     public String getPlan(Map<String, Object> dto) {
         log.info("【1】收到生成任务入参: {}", dto);
-        log.info("arkApiKey = [{}]", arkApiKey);
         log.info("endpointId = [{}]", endpointId);
         log.info("baseUrl = [{}]", baseUrl);
 
@@ -115,6 +117,9 @@ public class TravelPlanService {
                 dto.get("remark")
         );
         userContent += localDataSb;
+        if (amapMcpTravelPlanner.isEnabled()) {
+            return amapMcpTravelPlanner.generate(baseUrl, arkApiKey, endpointId, systemPrompt, userContent);
+        }
         log.info("【6】最终发给Agent的完整Prompt：{}", userContent);
         log.info("【7】开始调用大模型Agent（火山方舟）");
 
@@ -172,16 +177,17 @@ public class TravelPlanService {
         }
     }
 
-    public String submitGenerateTask(Map<String, Object> param) {
+    public String submitGenerateTask(long ownerId, Map<String, Object> param) {
         String taskId = UUID.randomUUID().toString();
-        TaskDTO task = new TaskDTO();
+        TaskDTO task = new TaskDTO(ownerId);
         task.setStatus("PROCESSING");
         taskMap.put(taskId, task);
         travelAsyncService.doGenerateAsync(taskId, param, taskMap);
         return taskId;
     }
 
-    public TaskDTO getTask(String taskId) {
-        return taskMap.get(taskId);
+    public TaskDTO getTask(long ownerId, String taskId) {
+        TaskDTO task = taskMap.get(taskId);
+        return task != null && task.getOwnerId() == ownerId ? task : null;
     }
 }

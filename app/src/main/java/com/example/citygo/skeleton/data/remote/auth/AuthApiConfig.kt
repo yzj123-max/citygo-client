@@ -27,8 +27,8 @@ object AuthApiConfig {
     const val PATH_LOGIN = "userLogin"
     /** 发送验证码：POST /sendCode（保留，当前注册/登录页不使用） */
     const val PATH_SEND_CODE = "sendCode"
-    /** 免密验证码登录：POST /verifyCodeLogin（保留，当前注册/登录页不使用） */
-    const val PATH_CODE_LOGIN = "verifyCodeLogin"
+    /** 验证码登录：POST /userLogin/code，JSON {phone, verifyCode}。 */
+    const val PATH_CODE_LOGIN = "userLogin/code"
     /** 获取当前登录用户信息（后端契约：GET /info） */
     const val PATH_GET_USER_INFO = "info"
     const val PATH_LOGOUT = "logout"
@@ -54,7 +54,7 @@ object AuthApiConfig {
     // ---- Query / Body / Header 字段名（与后端契约严格一致） ----
     const val FIELD_PHONE = "phone"
     const val FIELD_PASSWORD = "password"
-    const val FIELD_CODE = "code"
+    const val FIELD_CODE = "verifyCode"
     const val HEADER_AUTH = "Authorization"
     /**
      * 内部标记头：请求带此头表示「跳过 401 全局踢登录事件」。

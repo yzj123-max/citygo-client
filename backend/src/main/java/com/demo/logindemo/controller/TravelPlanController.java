@@ -9,9 +9,6 @@ import org.springframework.http.ResponseEntity;
 import java.util.HashMap;
 import java.util.Map;
 
-import java.util.HashMap;
-import java.util.Map;
-
 @CrossOrigin(origins = "*")
 @RestController
 @RequestMapping("/travel")
@@ -34,9 +31,10 @@ public class TravelPlanController {
 
     // ===== 新增1：提交异步任务，返回 taskId =====
     @PostMapping("/generateTask")
-    public Map<String, Object> generateTask(@RequestBody TravelPlanReqDTO dto) {
+    public Map<String, Object> generateTask(@RequestAttribute("userId") Long ownerId,
+                                            @RequestBody TravelPlanReqDTO dto) {
         Map<String,Object> map = objectMapper.convertValue(dto, Map.class);
-        String taskId = travelPlanService.submitGenerateTask(map);
+        String taskId = travelPlanService.submitGenerateTask(ownerId, map);
 
         Map<String, Object> resp = new HashMap<>();
         resp.put("success", true);
@@ -47,8 +45,9 @@ public class TravelPlanController {
 
     // ===== 新增2：轮询查询任务状态 =====
     @GetMapping("/task/{taskId}")
-    public Map<String, Object> queryTask(@PathVariable String taskId) {
-        TaskDTO task = travelPlanService.getTask(taskId);
+    public Map<String, Object> queryTask(@RequestAttribute("userId") Long ownerId,
+                                         @PathVariable String taskId) {
+        TaskDTO task = travelPlanService.getTask(ownerId, taskId);
         Map<String, Object> resp = new HashMap<>();
         if (task == null) {
             resp.put("success", false);
@@ -57,10 +56,11 @@ public class TravelPlanController {
         }
 
         resp.put("success", true);
-        resp.put("status", task.getStatus());
-        if ("SUCCESS".equals(task.getStatus())) {
+        String status = task.getStatus();
+        resp.put("status", status);
+        if ("SUCCESS".equals(status)) {
             resp.put("data", task.getResult());
-        } else if ("FAIL".equals(task.getStatus())) {
+        } else if ("FAIL".equals(status)) {
             resp.put("msg", "生成失败：" + task.getErrorMsg());
         } else {
             resp.put("msg", "正在生成，请稍后查询");
@@ -68,14 +68,15 @@ public class TravelPlanController {
         return resp;
     }
     @GetMapping("/getTask")
-    public ResponseEntity<?> getTask(@RequestParam String taskId) {
-        TaskDTO taskDTO = travelPlanService.getTask(taskId);
+    public ResponseEntity<?> getTask(@RequestAttribute("userId") Long ownerId, @RequestParam String taskId) {
+        TaskDTO taskDTO = travelPlanService.getTask(ownerId, taskId);
         if (taskDTO == null) {
             return ResponseEntity.status(404).body("任务不存在");
         }
         Map<String,Object> resp = new HashMap<>();
-        resp.put("status", taskDTO.getStatus());
-        resp.put("result", taskDTO.getResult());
+        String status = taskDTO.getStatus();
+        resp.put("status", status);
+        resp.put("result", "SUCCESS".equals(status) ? taskDTO.getResult() : null);
         resp.put("msg", "查询成功");
         return ResponseEntity.ok(resp);
     }

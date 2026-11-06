@@ -27,3 +27,7 @@ volc.tos.region=${TOS_REGION:}
 volc.tos.presignExpireSeconds=1800
 amap.poi.web-key=${AMAP_WEB_KEY:}
 attractions.admin-user-ids=${ATTRACTIONS_ADMIN_USER_IDS:}
+
+# AI travel planning: enable only after configuring a Web-service Key and a tool-capable Ark model.
+amap.mcp.enabled=${AMAP_MCP_ENABLED:false}
+amap.mcp.api-key=${AMAP_MCP_KEY:}

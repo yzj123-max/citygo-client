@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EditLocation
@@ -57,6 +59,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Dialog
 import com.example.citygo.skeleton.data.model.AiPlanOptions
 import com.example.citygo.skeleton.data.model.ALL_WEATHER_CITY_ENTRIES
@@ -111,12 +114,12 @@ fun PlanCityPickerDialog(
         ALL_WEATHER_CITY_ENTRIES.firstOrNull { it.adCode == hot.adCode }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.9f),
-            shape = RoundedCornerShape(24.dp),
+                .fillMaxHeight(),
+            shape = RoundedCornerShape(0.dp),
             color = MaterialTheme.colorScheme.surface,
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
@@ -395,24 +398,30 @@ fun TripConfigDialog(
     if (!visible) return
     var daysMenuExpanded by remember { mutableStateOf(false) }
 
-    Dialog(onDismissRequest = { if (!isGenerating) onDismiss() }) {
+    Dialog(onDismissRequest = { if (!isGenerating) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.92f),
-            shape = RoundedCornerShape(24.dp),
+                .fillMaxHeight(),
+            shape = RoundedCornerShape(0.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         ) {
             Column(
                 modifier = Modifier
                     .padding(22.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .fillMaxSize(),
             ) {
+                Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onDismiss, enabled = !isGenerating) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
+                    }
                 Text(
                     text = "行程配置",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                 )
+                }
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text = "确认目的地与出行偏好，再为你生成 AI 攻略",
@@ -466,6 +475,15 @@ fun TripConfigDialog(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    (1..5).forEach { option ->
+                        FilterChip(selected = days == option, onClick = { onDaysChange(option) }, enabled = !isGenerating,
+                            label = { Text("${option}天") },
+                            colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary))
+                    }
+                }
                 ExposedDropdownMenuBox(
                     expanded = daysMenuExpanded && !isGenerating,
                     onExpandedChange = { if (!isGenerating) daysMenuExpanded = it },
@@ -603,7 +621,8 @@ fun TripConfigDialog(
 
                 Spacer(Modifier.height(20.dp))
 
-                // 操作区：取消不生成；确认后才调用 AI 生成
+                }
+                // 操作区固定在底部，横屏或键盘展开时也能取消/提交。
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(
                         onClick = onDismiss,

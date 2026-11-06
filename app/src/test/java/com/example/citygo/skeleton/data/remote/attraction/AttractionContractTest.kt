@@ -38,6 +38,43 @@ class AttractionContractTest {
     }
     @After fun stop() { server.stop(0) }
 
+    @Test fun cityDiscoveryFallbackIsScopedAndDoesNotInventVerifiedPolicies() = runBlocking {
+        respond = { 200 to """{"code":200,"data":{"records":[{"amapPoiId":"B001","name":"故宫博物院","categoryCode":"110200","city":"北京市","coverUrl":"https://example.test/palace.jpg","longitude":116.4,"latitude":39.9,"coordSystem":"GCJ02"},{"amapPoiId":"B002","name":"景区停车场","categoryCode":"110200","city":"北京市"}],"hasMore":true}}""" }
+        val page = repository.cityDiscoveries("北京", 2)
+        val request = requests.take()
+        assertEquals("/api/attractions/search", request.path)
+        assertTrue(request.query.contains("city=北京"))
+        assertTrue(request.query.contains("page=2"))
+        assertEquals("CITY_SEARCH", page.source)
+        assertTrue(page.hasMore)
+        assertEquals("故宫博物院", page.spots.single().name)
+        assertEquals("UNKNOWN", page.spots.single().ticketStatus)
+        assertEquals("UNKNOWN", page.spots.single().petPolicy)
+        assertEquals("北京市", page.spots.single().city)
+    }
+
+    @Test fun cityHeroRequestsDoNotEvictAnotherCitysRecommendationPagination() = runBlocking {
+        var offset = 0
+        val description = "这是一段经核对的景点历史与看点介绍。".repeat(12)
+        respond = { path ->
+            val id = path.substringAfterLast('/').toIntOrNull()
+            200 to if (id == null) {
+                val records = (1..21).joinToString(",") {
+                    """{"attractionId":${offset + it},"name":"城市景区$it","level":"5A","coverUrl":"https://example.test/${offset + it}.jpg"}"""
+                }
+                """{"code":200,"data":{"records":[$records],"total":21,"hasMore":false}}"""
+            } else """{"code":200,"data":{"attractionId":$id,"name":"城市景区$id","city":"${if (id > 100) "重庆市" else "北京市"}","description":"$description","descriptionSourceUrl":"https://example.test/source","descriptionVerifiedAt":"2026-10-27","longitude":116.4,"latitude":39.9,"coordSystem":"GCJ02","images":[{"url":"https://example.test/$id.jpg"}],"collectedInfo":{"ticketPrice":"收费","openTime":"09:00—17:00"}}}"""
+        }
+        assertEquals(20, repository.recommendations("北京").spots.size)
+        offset = 100
+        assertEquals(20, repository.recommendations("重庆").spots.size)
+        requests.clear()
+        respond = { 500 to """{"code":500,"msg":"This cached page must not make a new request"}""" }
+        assertEquals("21", repository.recommendations("北京", page = 2).spots.single().spotId)
+        assertEquals("121", repository.recommendations("重庆", page = 2).spots.single().spotId)
+        assertTrue(requests.isEmpty())
+    }
+
     @Test fun searchAndNearbyUseBackendPaginationAndGcjCoordinates() = runBlocking {
         respond = { 200 to """{"code":200,"data":{"page":2,"returnedCount":1,"hasMore":true,"records":[{"amapPoiId":"B03530QO2H","name":"慈云寺","longitude":106.687651,"latitude":26.330716,"coordSystem":"GCJ02","distanceMeters":92}]}}""" }
         val page = repository.searchPage("青岩古镇", 2)

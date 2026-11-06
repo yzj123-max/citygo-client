@@ -58,7 +58,9 @@ fun CityLandscape(modifier: Modifier = Modifier) {
 
 @Composable
 fun DiscoveryIntro(city: String, petFriendly: Boolean, onPetFriendlyChange: (Boolean) -> Unit,
-    onPlan: () -> Unit, onOutfit: () -> Unit, onNearby: () -> Unit, heroPhoto: String? = null) {
+    onPlan: () -> Unit, onOutfit: () -> Unit, onNearby: () -> Unit, heroPhoto: String? = null,
+    tripCity: String? = null, tripDays: Int = 0, tripPlaceCount: Int = 0,
+    onViewPlan: () -> Unit = {}) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("CityGo", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
@@ -85,8 +87,18 @@ fun DiscoveryIntro(city: String, petFriendly: Boolean, onPetFriendlyChange: (Boo
                 Spacer(Modifier.height(30.dp))
                 Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .94f)) {
                     Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                        Text(if (city == "全部城市") "选择一座城市，开始新的旅程" else "$city · 让灵感成为行程",
+                        Text(if (tripCity != null) "$tripCity · $tripDays 天 · $tripPlaceCount 个地点"
+                            else if (city == "全部城市") "选择一座城市，开始新的旅程" else "$city · 让灵感成为行程",
                             style = MaterialTheme.typography.titleSmall)
+                        if (tripCity != null) {
+                            Spacer(Modifier.height(12.dp))
+                            Button(onClick = onViewPlan, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                                Text("查看我的行程")
+                                Spacer(Modifier.weight(1f))
+                                Icon(Icons.AutoMirrored.Filled.ArrowForward, null, Modifier.size(18.dp))
+                            }
+                            TextButton(onClick = onPlan, modifier = Modifier.align(Alignment.End)) { Text("规划新旅行") }
+                        } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("优先宠物友好地点", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                             Switch(checked = petFriendly, onCheckedChange = onPetFriendlyChange)
@@ -95,6 +107,7 @@ fun DiscoveryIntro(city: String, petFriendly: Boolean, onPetFriendlyChange: (Boo
                             Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp)); Text("AI 规划我的旅行")
                             Spacer(Modifier.weight(1f)); Icon(Icons.AutoMirrored.Filled.ArrowForward, null, Modifier.size(18.dp))
+                        }
                         }
                     }
                 }

@@ -85,6 +85,7 @@ fun PlanChatAssistantDialog(
     onSend: (String) -> Unit,
     onApplyProposal: (Long) -> Unit,
     onDeclineProposal: (Long) -> Unit,
+    tripSummary: String? = null,
 ) {
     if (!visible) return
 
@@ -111,13 +112,12 @@ fun PlanChatAssistantDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(0.dp),
             color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
+            tonalElevation = 0.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.92f)
-                .padding(horizontal = 10.dp)
+                .fillMaxHeight()
                 .statusBarsPadding()
                 .navigationBarsPadding(),
         ) {
@@ -127,6 +127,13 @@ fun PlanChatAssistantDialog(
                     .imePadding(),
             ) {
                 ChatHeader(onClose = onDismiss)
+                if (!tripSummary.isNullOrBlank()) Surface(color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text("当前行程", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        Text(tripSummary, style = MaterialTheme.typography.titleSmall)
+                    }
+                }
 
                 // —— 消息列表（可滚动查看全部历史） ——
                 Box(modifier = Modifier.weight(1f)) {

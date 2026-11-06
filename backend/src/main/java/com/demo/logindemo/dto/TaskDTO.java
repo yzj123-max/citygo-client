@@ -4,8 +4,9 @@ import lombok.Data;
 
 @Data
 public class TaskDTO {
+    private final long ownerId;
     // 状态：PROCESSING 生成中 / SUCCESS 成功 / FAIL 失败
-    private String status;
+    private volatile String status;
     private String result; // 最终攻略文本
     private String errorMsg; // 失败原因
 }

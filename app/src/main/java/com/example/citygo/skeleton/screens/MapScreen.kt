@@ -30,6 +30,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Add
@@ -57,6 +59,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
@@ -157,10 +160,12 @@ fun MapScreen(
     ) -> Unit,
     /** 点击 Marker 信息卡「在行程卡片中查看」：切到出行计划 Tab 并定位到该点位卡片 */
     onViewInPlan: (Place) -> Unit,
+    onSearch: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     // 行程点位 / 天数 / 城市均来自全局共享的 TripPlan（与出行计划页同一数据源，不会不一致）
     val tripPlan by appViewModel.tripPlan.collectAsStateWithLifecycle()
+    val tripSyncState by appViewModel.tripSyncState.collectAsStateWithLifecycle()
     val tripPoints = tripPlan.allPlaces
     val cityName = tripPlan.city
     // 计划页点击条目后下发的待聚焦点位（一次性消费）
@@ -181,6 +186,13 @@ fun MapScreen(
 
     // 天数过滤：null=全部天数；否则只渲染第 N 天点位
     var selectedDay by rememberSaveable { mutableStateOf<Int?>(null) }
+    var filterTripId by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(tripSyncState.activeTripId) {
+        if (filterTripId != tripSyncState.activeTripId) {
+            selectedDay = null
+            filterTripId = tripSyncState.activeTripId
+        }
+    }
     // 新行程生成后天数变少，重置越界的选择
     LaunchedEffect(tripPlan.totalDays) {
         if ((selectedDay ?: 1) > tripPlan.totalDays) selectedDay = null
@@ -358,6 +370,10 @@ fun MapScreen(
      * 所有入口进入选线页后仍保留这一来源。
      */
     fun requestRouteNavigation() {
+        if (listOfNotNull(routeA, routeB, gpsTarget).any { it.mockedCoord }) {
+            scope.launch { snackbarHostState.showSnackbar("地点位置尚未核实，请先在行程页校准地点") }
+            return
+        }
         when {
             routeA != null && routeB != null -> launchRouteNavigation(NaviMode.SIMULATION)
             gpsTarget != null -> continueRealGpsPrecheck()
@@ -446,18 +462,6 @@ fun MapScreen(
 
     Column(modifier = modifier.fillMaxSize()) {
         // ---------- 顶部信息条 ----------
-        MapTopBar(
-            pointCount = tripPoints.size,
-            onClear = {
-                selectedPointId = null
-                selectedDay = null
-                closeRoutePanel()
-                appViewModel.clearPlan()
-                // 清空行程操作反馈（与计划页清空提示保持一致）
-                Toast.makeText(context, "行程已清空", Toast.LENGTH_SHORT).show()
-            },
-        )
-
         // ---------- 地图主体 ----------
         Box(
             modifier = Modifier
@@ -465,11 +469,12 @@ fun MapScreen(
                 .weight(1f),
         ) {
             // 当日点位内容签名（id + 经纬度）作为「点位 / 天数是否变化」的 key
-            val pointsKey = dayPoints.joinToString(separator = ";") { "${it.id}@${it.lat},${it.lng}" }
-            val allPointsKey = tripPoints.joinToString(separator = ";") { "${it.id}@${it.lat},${it.lng}" }
-            var fittedKey by rememberSaveable { mutableStateOf<String?>(null) }
+            val pointsKey = dayPoints.joinToString(separator = ";") { "${it.id}@${it.lat},${it.lng}:${it.mockedCoord}:${it.name}" }
+            val allPointsKey = "${tripSyncState.activeTripId}#" + tripPoints.joinToString(separator = ";") { "${it.id}@${it.lat},${it.lng}:${it.mockedCoord}" }
+            // Camera completion belongs to this native map instance, not a saved navigation tab.
+            var fittedKey by remember(mapState) { mutableStateOf<String?>(null) }
             // 计划页条目联动聚焦时，抑制一次「天数切换 / 点位变化自动框选」，避免覆盖聚焦相机
-            var suppressNextFit by rememberSaveable { mutableStateOf(false) }
+            var suppressNextFit by remember(mapState) { mutableStateOf(false) }
 
             // ① 高德真实地图（arm 设备）/ 降级提示面板（x86 模拟器）
             if (isArmAbiSupported(context)) {
@@ -498,15 +503,15 @@ fun MapScreen(
 
             // ② Marker 全量同步（数据变化 / 天数切换 / 选中态 / 路线选点 / 地图就绪）
             LaunchedEffect(
-                mapState.mapReady,
+                mapState.mapLoaded,
                 pointsKey,
                 selectedPointId,
                 routeA?.id,
                 routeB?.id,
             ) {
-                if (mapState.mapReady) {
+                if (mapState.mapLoaded) {
                     mapState.renderPlaceMarkers(
-                        points = dayPoints,
+                        points = dayPoints.filterNot { it.mockedCoord },
                         selectedId = selectedPointId,
                         routeStartId = routeA?.id,
                         routeEndId = routeB?.id,
@@ -515,28 +520,36 @@ fun MapScreen(
             }
 
             // ③ 天数切换 / 点位集合变化：清旧 Marker 后只渲染当日点位并自动框选当日全部点
-            LaunchedEffect(allPointsKey, selectedDay, mapState.mapReady) {
-                if (!mapState.mapReady) return@LaunchedEffect
+            LaunchedEffect(allPointsKey, selectedDay, mapState.mapLoaded, mapState.viewportWidth, mapState.viewportHeight) {
+                if (!mapState.mapLoaded || mapState.viewportWidth <= 0 || mapState.viewportHeight <= 0) return@LaunchedEffect
                 if (suppressNextFit) {
                     // 本次视野变化来自计划页条目联动，相机交给 ③-补 聚焦逻辑
                     suppressNextFit = false
                     return@LaunchedEffect
                 }
-                val fitKey = "${selectedDay ?: -1}#$allPointsKey"
+                val fitKey = "${mapState.viewportWidth}x${mapState.viewportHeight}#${selectedDay ?: -1}#$allPointsKey"
                 if (fittedKey == fitKey) return@LaunchedEffect
-                fittedKey = fitKey
-                selectedPointId = null
+                selectedPointId = dayPoints.firstOrNull { !it.mockedCoord }?.id
                 closeRoutePanel()
-                if (dayPoints.isEmpty()) {
+                val locatedPoints = dayPoints.filterNot { it.mockedCoord }
+                if (locatedPoints.isEmpty()) {
                     mapState.animateTo(CameraTarget(DEFAULT_LAT, DEFAULT_LNG, DEFAULT_ZOOM))
                 } else {
-                    mapState.fitPoints(dayPoints, paddingPx = 120)
+                    if (mapState.fitPoints(locatedPoints, paddingPx = 100,
+                        topPaddingPx = (mapState.viewportHeight * .12f).toInt(),
+                        bottomPaddingPx = (mapState.viewportHeight * .32f).toInt())) fittedKey = fitKey
                 }
             }
 
             // ③-补 计划页行程条目联动：解除会隐藏目标点的天数过滤，相机平移放大到该点并高亮 Marker
-            LaunchedEffect(focusPlace?.id) {
+            LaunchedEffect(focusPlace?.id, mapState.mapLoaded) {
                 val place = focusPlace ?: return@LaunchedEffect
+                if (!mapState.mapLoaded) return@LaunchedEffect
+                if (place.mockedCoord) {
+                    snackbarHostState.showSnackbar("该地点位置待核实，请在行程页校准地点")
+                    appViewModel.consumeMapFocusPlace()
+                    return@LaunchedEffect
+                }
                 if (selectedDay != null && selectedDay != place.dayIndex) {
                     // 切换天数会触发 ③ 的自动框选，抑制一次由聚焦相机接管
                     suppressNextFit = true
@@ -633,16 +646,47 @@ fun MapScreen(
                 EmptyTripHint(modifier = Modifier.align(Alignment.Center))
             }
 
-            // ⑨ 左上角：行程天数切换下拉
-            if (isArmAbiSupported(context) && tripPlan.totalDays > 0) {
-                DaySelectorDropdown(
-                    totalDays = tripPlan.totalDays,
-                    selectedDay = selectedDay,
-                    onSelect = { selectedDay = it },
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(start = 12.dp, top = 10.dp),
-                )
+            Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Surface(shape = RoundedCornerShape(24.dp), shadowElevation = 2.dp,
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.weight(1f).clickable { onSearch?.invoke() }) {
+                    Row(Modifier.padding(horizontal = 14.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Search, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(8.dp))
+                        Text("搜索地点或查看行程", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (isArmAbiSupported(context) && tripPlan.totalDays > 0) DaySelectorDropdown(
+                    totalDays = tripPlan.totalDays, selectedDay = selectedDay,
+                    onSelect = { selectedDay = it })
+            }
+            Box(Modifier.align(Alignment.TopEnd).padding(end = 12.dp, top = 72.dp)) {
+                var showMapMenu by remember { mutableStateOf(false) }
+                var confirmClear by remember { mutableStateOf(false) }
+                Box {
+                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface, shadowElevation = 2.dp) {
+                        IconButton(onClick = { showMapMenu = true }) { Icon(Icons.Filled.MoreVert, "地图管理") }
+                    }
+                    androidx.compose.material3.DropdownMenu(showMapMenu, { showMapMenu = false }) {
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("共 ${tripPoints.size} 个行程地点") },
+                            onClick = { showMapMenu = false })
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("查看全部行程地点") },
+                            onClick = {
+                                showMapMenu = false
+                                selectedDay = null
+                                mapState.fitPoints(tripPoints.filterNot { it.mockedCoord }, paddingPx = 120)
+                            }, enabled = tripPoints.any { !it.mockedCoord })
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("清空行程", color = MaterialTheme.colorScheme.error) },
+                            onClick = { showMapMenu = false; confirmClear = true }, enabled = tripPoints.isNotEmpty())
+                    }
+                }
+                if (confirmClear) androidx.compose.material3.AlertDialog(onDismissRequest = { confirmClear = false },
+                    title = { Text("清空当前行程？") }, confirmButton = {
+                        TextButton(onClick = {
+                            selectedPointId = null; selectedDay = null; closeRoutePanel(); appViewModel.clearPlan(); confirmClear = false
+                        }) { Text("清空", color = MaterialTheme.colorScheme.error) }
+                    }, dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("取消") } })
             }
 
             // ⑩ 右侧控制组（仅真实地图可用时展示，避免压在降级面板上）
@@ -673,7 +717,7 @@ fun MapScreen(
                     startName = routeA?.name.orEmpty(),
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 10.dp),
+                        .padding(top = 120.dp),
                     onCancel = {
                         routeA = null
                         routePlanner.clear()
@@ -687,7 +731,7 @@ fun MapScreen(
                 hostState = snackbarHostState,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 64.dp),
+                    .padding(top = 124.dp),
             )
 
             // ⑬ 底部路线面板（两点都齐 / GPS 路线激活时展示，替代信息卡）
@@ -730,6 +774,8 @@ fun MapScreen(
                 // ⑭ Marker 信息卡（气泡：名称 / 类型 / 天数 / 简介 + 路线动作）
                 PointInfoCard(
                     point = selectedPoint,
+                    mode = mode,
+                    onModeChange = { travelMode = it.name },
                     hasLocationPermission = hasLocationPermission,
                     routeStartSelected = routeA?.id == selectedPoint.id,
                     canPickEnd = routeA != null && routeA?.id != selectedPoint.id,
@@ -794,7 +840,7 @@ private data class NaviPrecheckDialog(
 /* ------------------------------------ 顶部条 ------------------------------------ */
 
 @Composable
-private fun MapTopBar(pointCount: Int, onClear: () -> Unit) {
+private fun MapTopBar(pointCount: Int, locatedCount: Int, onClear: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp, shadowElevation = 0.dp) {
         Row(
             modifier = Modifier
@@ -810,7 +856,7 @@ private fun MapTopBar(pointCount: Int, onClear: () -> Unit) {
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
-                    text = if (pointCount > 0) "共 $pointCount 个行程点位" else "暂无行程点位",
+                    text = if (pointCount > 0) "共 $pointCount 个地点 · $locatedCount 个已定位" else "暂无行程点位",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1373,6 +1419,8 @@ private fun RouteSuccessContent(route: com.example.citygo.skeleton.screens.amap.
 @Composable
 private fun PointInfoCard(
     point: Place,
+    mode: RouteTravelMode,
+    onModeChange: (RouteTravelMode) -> Unit,
     hasLocationPermission: Boolean,
     routeStartSelected: Boolean,
     canPickEnd: Boolean,
@@ -1384,128 +1432,57 @@ private fun PointInfoCard(
     onViewInPlan: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+    var showActions by remember(point.id) { mutableStateOf(false) }
+    var showDetails by remember(point.id) { mutableStateOf(false) }
+    Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(point.placeType.color, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(text = point.placeType.emoji, fontSize = 18.sp)
+                if (!point.coverUrl.isNullOrBlank()) {
+                    com.example.citygo.skeleton.share.CommunityImage(data = point.coverUrl!!,
+                        modifier = Modifier.size(64.dp), cornerShape = RoundedCornerShape(12.dp), contentDescription = point.name)
+                    Spacer(Modifier.width(12.dp))
                 }
-                Spacer(Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = point.name,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        TypeBadge(placeType = point.placeType)
-                        Surface(
-                            shape = RoundedCornerShape(50),
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                        ) {
-                            Text(
-                                text = "第 ${point.dayIndex} 天",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            )
+                Column(Modifier.weight(1f)) {
+                    Text(point.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text("${point.placeType.label} · 第 ${point.dayIndex} 天", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (point.intro.isNotBlank()) Text(point.intro, style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Box {
+                    IconButton(onClick = { showActions = true }, modifier = Modifier.size(30.dp)) { Icon(Icons.Filled.MoreVert, "地点操作") }
+                    androidx.compose.material3.DropdownMenu(showActions, { showActions = false }) {
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("地点详情") }, onClick = { showDetails = !showDetails; showActions = false })
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(when {
+                            canPickEnd -> "选为终点并规划"; routeStartSelected -> "取消路线起点"; else -> "选为路线起点"
+                        }) }, onClick = { if (canPickEnd) onPickEnd(point) else onPickStart(point); showActions = false })
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("关闭地点卡片") }, onClick = { showActions = false; onClose() })
+                    }
+                }
+            }
+            if (showDetails) {
+                Text(point.intro, style = MaterialTheme.typography.bodySmall)
+                Text("位置：${point.lat}, ${point.lng}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(RouteTravelMode.WALK, RouteTravelMode.RIDE, RouteTravelMode.DRIVE, RouteTravelMode.BUS).forEach { item ->
+                    Surface(onClick = { onModeChange(item) }, modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (mode == item) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant) {
+                        Column(Modifier.padding(vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(item.icon(), null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                            Text(item.label, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
-                Icon(
-                    imageVector = Icons.Filled.Close,
-                    contentDescription = "关闭",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .size(22.dp)
-                        .clickable(onClick = onClose),
-                )
             }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = point.intro,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "经纬度：${point.lat}, ${point.lng}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
-            )
-
-            // 跳转「出行计划」Tab：滚动定位到该点位所在天的行程卡片并高亮
-            Spacer(Modifier.height(10.dp))
-            OutlinedButton(
-                onClick = onViewInPlan,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Filled.DateRange, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("在行程卡片中查看")
-            }
-
-            // 当前位置 → 目标地点：无定位权限时禁用并提供授权入口
-            Spacer(Modifier.height(12.dp))
-            Button(
-                onClick = { onGpsRoute(point) },
-                enabled = hasLocationPermission,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Filled.GpsFixed, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("从我的位置出发导航")
-            }
-            if (!hasLocationPermission) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "未授予定位权限，无法获取当前位置",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = onRequestPermission) {
-                        Text("授权定位")
-                    }
-                }
-            }
-
-            // 两点路线选点
-            Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(
-                    onClick = {
-                        if (canPickEnd) onPickEnd(point) else onPickStart(point)
-                    },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Filled.Route, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        when {
-                            canPickEnd -> "选为终点并规划"
-                            routeStartSelected -> "取消路线起点"
-                            else -> "选为路线起点"
-                        },
-                    )
+                OutlinedButton(onClick = onViewInPlan, modifier = Modifier.weight(1f)) { Text("查看行程") }
+                Button(onClick = { if (hasLocationPermission) onGpsRoute(point) else onRequestPermission() }, modifier = Modifier.weight(1.25f)) {
+                    Icon(Icons.Filled.GpsFixed, null, Modifier.size(16.dp)); Spacer(Modifier.width(5.dp))
+                    Text(if (hasLocationPermission) "开始导航" else "开启定位")
                 }
             }
         }

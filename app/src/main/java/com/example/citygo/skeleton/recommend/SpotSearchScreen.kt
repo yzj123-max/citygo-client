@@ -92,7 +92,7 @@ fun SpotSearchScreen(
                         value = searchState.keyword,
                         onValueChange = recommendViewModel::onSearchInputChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("搜索景点名称 / 城市") },
+                        placeholder = { Text(searchState.city?.let { "搜索${it}的景点" } ?: "搜索景点名称 / 城市") },
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Filled.Search,

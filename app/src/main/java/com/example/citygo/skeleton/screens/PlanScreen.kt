@@ -31,6 +31,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -121,11 +123,15 @@ fun PlanScreen(
     modifier: Modifier = Modifier,
     requestPlanning: Boolean = false,
     onPlanningRequestHandled: () -> Unit = {},
+    overviewRequest: Int = 0,
+    requestedCity: String? = null,
+    onOpenWeather: (() -> Unit)? = null,
 ) {
     // 子 Tab 下标：0=出行计划，1=天气预报；rememberSaveable 保证切 Tab / 转屏后保留
     var selectedSubIndex by rememberSaveable { mutableIntStateOf(0) }
     val subTabs = listOf("我的行程", "天气预报")
     LaunchedEffect(requestPlanning) { if (requestPlanning) selectedSubIndex = 0 }
+    LaunchedEffect(overviewRequest) { if (overviewRequest > 0) selectedSubIndex = 0 }
 
     // 从地图 Marker 信息卡点「查看行程卡片」跳回时，强制切回「出行计划」子 Tab
     val planFocusPlace by appViewModel.planFocusPlace.collectAsStateWithLifecycle()
@@ -134,7 +140,7 @@ fun PlanScreen(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = selectedSubIndex, containerColor = MaterialTheme.colorScheme.background) {
+        if (onOpenWeather == null) TabRow(selectedTabIndex = selectedSubIndex, containerColor = MaterialTheme.colorScheme.background) {
             subTabs.forEachIndexed { index, title ->
                 Tab(
                     selected = selectedSubIndex == index,
@@ -143,14 +149,16 @@ fun PlanScreen(
                 )
             }
         }
-        when (selectedSubIndex) {
+        when (if (onOpenWeather != null) 0 else selectedSubIndex) {
             0 -> TripPlanSubPage(
                 appViewModel = appViewModel,
                 onViewMapPoints = onViewMapPoints,
                 onPlanPointClick = onPlanPointClick,
                 onGoRecommend = onGoRecommend,
                 requestPlanning = requestPlanning,
+                requestedCity = requestedCity,
                 onPlanningRequestHandled = onPlanningRequestHandled,
+                onOpenWeather = onOpenWeather,
             )
             1 -> WeatherForecastSubPage(
                 weatherViewModel = weatherViewModel,
@@ -165,6 +173,7 @@ fun PlanScreen(
 /**
  * 出行计划子页：订阅全局当前行程，按天分组罗列全部地点。
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun TripPlanSubPage(
     appViewModel: AppViewModel,
@@ -172,14 +181,18 @@ private fun TripPlanSubPage(
     onPlanPointClick: (Place) -> Unit,
     onGoRecommend: () -> Unit,
     requestPlanning: Boolean,
+    requestedCity: String?,
     onPlanningRequestHandled: () -> Unit,
+    onOpenWeather: (() -> Unit)?,
 ) {
     val context = LocalContext.current
     // 全局行程（景点详情页「加入行程」写入；Room 持久化，App 重启不丢失）
     // 与地图页订阅同一个全局 TripPlan（城市 / 天数 / 预算 / 偏好 / 按天景点），两页数据一致
     val tripPlan by appViewModel.tripPlan.collectAsStateWithLifecycle()
+    val repairingLocations by appViewModel.repairingLocations.collectAsStateWithLifecycle()
     // 当前城市（我的页城市选择器写入；作为 AI 攻略生成的目的地）
-    val currentCity by appViewModel.currentCity.collectAsStateWithLifecycle()
+    val selectedCity by appViewModel.currentCity.collectAsStateWithLifecycle()
+    val currentCity = tripPlan.city.takeUnless { tripPlan.isEmpty } ?: selectedCity
     // AI 地点封面图地址表（确认采纳攻略后异步填充，图片到达后卡片自动刷新；无图的地点不显示图）
     val placeCoverMap by appViewModel.placeCoverMap.collectAsStateWithLifecycle()
     // 「优先宠物友好地点」复选框勾选状态
@@ -195,6 +208,13 @@ private fun TripPlanSubPage(
     // 每日行程严格按第 1 天 → 第 N 天排列（景点按 dayIndex 分好组）
     val dailyPlans = tripPlan.dailyPlans
     val hasPlaces = tripPlan.allPlaces.isNotEmpty()
+    var selectedDay by rememberSaveable(tripPlan.city) { mutableIntStateOf(1) }
+    LaunchedEffect(dailyPlans.map { it.day }) {
+        if (dailyPlans.none { it.day == selectedDay }) selectedDay = dailyPlans.firstOrNull()?.day ?: 1
+    }
+    var showClearConfirm by remember { mutableStateOf(false) }
+    var showManageSheet by remember { mutableStateOf(false) }
+    val dayCardsStartIndex = 2 + if (tripPlan.allPlaces.any { it.mockedCoord }) 1 else 0
 
     // 地图 Marker 信息卡「查看行程卡片」→ 滚动到对应天卡片并短暂高亮该点位
     val planListState = rememberLazyListState()
@@ -203,7 +223,8 @@ private fun TripPlanSubPage(
     LaunchedEffect(focusPoint?.id) {
         val focus = focusPoint ?: return@LaunchedEffect
         // 前面固定 4 个 item（trip_sync / city_step / title_row / overview）。
-        val targetIndex = 4 + (focus.dayIndex - 1).coerceAtLeast(0)
+        selectedDay = focus.dayIndex
+        val targetIndex = dayCardsStartIndex
         runCatching { planListState.animateScrollToItem(targetIndex) }
         highlightPointId = focus.id
         appViewModel.consumePlanFocusPlace()
@@ -227,8 +248,13 @@ private fun TripPlanSubPage(
     // 「规划第一步」弹窗状态：城市选择弹窗 → 行程配置表单（选城市只弹表单，不直接生成行程）
     var showCityPicker by remember { mutableStateOf(false) }
     var showTripConfig by remember { mutableStateOf(false) }
+    var draftCity by remember { mutableStateOf(currentCity) }
     LaunchedEffect(requestPlanning) {
-        if (requestPlanning) { showTripConfig = true; onPlanningRequestHandled() }
+        if (requestPlanning) {
+            draftCity = requestedCity ?: currentCity
+            showTripConfig = true
+            onPlanningRequestHandled()
+        }
     }
     val scrollScope = rememberCoroutineScope()
 
@@ -238,11 +264,11 @@ private fun TripPlanSubPage(
 
     // 行程配置表单字段：以 currentCity 为 remember 键——切换城市时自动重置
     // （天数回 1、预算清空、偏好清空），对应「换城市清空天数配置」要求。
-    var tripDays by remember(currentCity) { mutableStateOf(AiPlanOptions.MIN_DAYS) }
-    var tripBudgetText by remember(currentCity) { mutableStateOf("") }
-    var tripPrefs by remember(currentCity) { mutableStateOf(emptySet<String>()) }
+    var tripDays by remember(draftCity) { mutableStateOf(AiPlanOptions.MIN_DAYS) }
+    var tripBudgetText by remember(draftCity) { mutableStateOf("") }
+    var tripPrefs by remember(draftCity) { mutableStateOf(emptySet<String>()) }
     // 额外备注（选填，切换城市一并清空）
-    var tripRemark by remember(currentCity) { mutableStateOf("") }
+    var tripRemark by remember(draftCity) { mutableStateOf("") }
 
     // 进入轮询 / 失败 / 成功（含同步直接成功）/ 地点无法匹配时关闭配置表单，
     // 具体结果由各自独立弹窗承接（成功弹窗展示后端 data 攻略原文）。
@@ -263,43 +289,27 @@ private fun TripPlanSubPage(
     LazyColumn(
         state = planListState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 94.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 94.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         // —— 规划第一步：选择目的地城市（入口由「我的」页迁移至此，全量城市搜索） ——
-        item(key = "trip_sync") {
-            com.example.citygo.skeleton.screens.plan.TripSyncPanel(appViewModel)
-        }
         item(key = "city_step") {
             CityStepCard(
                 cityName = currentCity,
                 hasPlaces = hasPlaces,
-                onPickCity = { showCityPicker = true },
+                onPickCity = { draftCity = currentCity; showCityPicker = true },
+                onWeather = onOpenWeather,
+                onManage = { showManageSheet = true },
             )
         }
 
         // —— 标题行 + 右上角「清空行程」（仅有行程时展示） ——
-        item(key = "title_row") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "我的行程",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
-                )
-                if (hasPlaces) {
-                    TextButton(onClick = {
-                        appViewModel.clearPlan()
-                        Toast.makeText(context, "行程已清空", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(
-                            imageVector = Icons.Filled.DeleteOutline,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text("清空行程")
-                    }
+        if (tripPlan.allPlaces.any { it.mockedCoord }) item(key = "location_repair") {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("部分地点位置待核实", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                TextButton(onClick = appViewModel::repairPlanLocations, enabled = !repairingLocations) {
+                    Text(if (repairingLocations) "正在校准…" else "校准地点")
                 }
             }
         }
@@ -318,18 +328,24 @@ private fun TripPlanSubPage(
                 onGenerateAiPlan = {
                     // 不再前端本地生成攻略：仅唤起既有的行程配置弹窗，
                     // 用户在弹窗里填好参数点「生成 AI 攻略」后，由 ViewModel 请求后端唯一接口。
+                    draftCity = currentCity
                     showTripConfig = true
                 },
             )
             if (dailyPlans.isNotEmpty()) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 10.dp),
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 2.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     dailyPlans.forEach { day ->
-                        FilterChip(selected = false, onClick = {
-                            scrollScope.launch { planListState.animateScrollToItem(4 + dailyPlans.indexOf(day)) }
-                        }, label = { Text("第 ${day.day} 天") })
+                        FilterChip(selected = day.day == selectedDay, onClick = {
+                            selectedDay = day.day
+                        }, colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary),
+                            label = { Text("第 ${day.day} 天") })
                     }
                 }
+                Spacer(Modifier.height(10.dp))
+                com.example.citygo.ui.theme.PlanMiniRoute(dailyPlans.firstOrNull { it.day == selectedDay }?.places.orEmpty(), onViewMapPoints)
             }
         }
 
@@ -341,7 +357,7 @@ private fun TripPlanSubPage(
         }
 
         // —— 逐日卡片：D1 / D2… 每天一张卡，卡内罗列当天全部景点，可单独移除 / 为该天加景点 ——
-        items(dailyPlans, key = { it.day }) { dayPlan ->
+        items(dailyPlans.filter { it.day == selectedDay }, key = { it.day }) { dayPlan ->
             DayPlanCard(
                 day = dayPlan.day,
                 points = dayPlan.places,
@@ -367,8 +383,28 @@ private fun TripPlanSubPage(
         }
     }
 
+        if (showManageSheet) androidx.compose.material3.ModalBottomSheet(onDismissRequest = { showManageSheet = false }) {
+            Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("行程管理", style = MaterialTheme.typography.titleLarge)
+                com.example.citygo.skeleton.screens.plan.TripSyncPanel(appViewModel)
+                TextButton(onClick = { showManageSheet = false; draftCity = currentCity; showTripConfig = true }) { Text("重新配置旅行") }
+                TextButton(onClick = { showManageSheet = false; draftCity = currentCity; showCityPicker = true }) { Text("更换目的地城市") }
+                if (hasPlaces) TextButton(onClick = { showManageSheet = false; showClearConfirm = true }) {
+                    Text("清空当前行程", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+        if (showClearConfirm) AlertDialog(onDismissRequest = { showClearConfirm = false },
+            title = { Text("清空当前行程？") }, text = { Text("将移除当前行程的地点，请确认后继续。") },
+            confirmButton = { TextButton(onClick = {
+                appViewModel.clearPlan(); showClearConfirm = false
+                Toast.makeText(context, "行程已清空", Toast.LENGTH_SHORT).show()
+            }) { Text("清空", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text("取消") } })
+
         // —— 唯一新增 UI：右下角【AI助手】悬浮按钮（不改动上方任何既有组件位置） ——
         ExtendedFloatingActionButton(
+            shape = RoundedCornerShape(14.dp),
             onClick = appViewModel::openChatDialog,
             icon = {
                 Icon(
@@ -381,7 +417,7 @@ private fun TripPlanSubPage(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(horizontal = 18.dp, vertical = 12.dp)
-                .fillMaxWidth(),
+                .fillMaxWidth().height(44.dp),
         )
 
         // 豆包对话弹窗（聊天记录保存在内存；模型回传的新行程以「待确认提议」挂在助手消息上，
@@ -395,15 +431,16 @@ private fun TripPlanSubPage(
             onSend = appViewModel::sendChatMessage,
             onApplyProposal = appViewModel::applyChatProposal,
             onDeclineProposal = appViewModel::declineChatProposal,
+            tripSummary = if (hasPlaces) "${tripPlan.city} · ${dailyPlans.size} 天 · ${tripPlan.allPlaces.size} 个地点" else "尚未添加旅行安排",
         )
 
         // 规划第一步：城市选择弹窗（全国城市库 + 任意关键字；选定后只弹配置表单，不生成行程）
         PlanCityPickerDialog(
             visible = showCityPicker,
-            currentCityName = currentCity,
+            currentCityName = draftCity,
             onCitySelected = { name ->
                 // 更新全局目的地城市（DataStore 持久化），随后进入行程配置表单
-                appViewModel.selectCity(name)
+                draftCity = name
                 showCityPicker = false
                 showTripConfig = true
             },
@@ -415,7 +452,7 @@ private fun TripPlanSubPage(
         // http://127.0.0.1:8080/）；拿到 taskId 后由 VM 在后台轮询，取消不做任何事
         TripConfigDialog(
             visible = showTripConfig,
-            cityName = currentCity,
+            cityName = draftCity,
             // 仅 POST 提交期间禁用按钮防重复提交；后台轮询不锁该弹窗（弹窗此时已关闭）
             isGenerating = travelTaskState is TravelTaskState.Submitting,
             days = tripDays,
@@ -439,7 +476,7 @@ private fun TripPlanSubPage(
                     petFriendly = aiPetFriendly || AiPlanOptions.PREF_PET in tripPrefs,
                     remark = tripRemark.trim().ifBlank { null },
                 )
-                appViewModel.submitTravelGuideTask(currentCity, options)
+                appViewModel.submitTravelGuideTask(draftCity, options)
             },
             onChangeCity = {
                 showTripConfig = false
@@ -579,17 +616,19 @@ private fun CityStepCard(
     cityName: String,
     hasPlaces: Boolean,
     onPickCity: () -> Unit,
+    onWeather: (() -> Unit)?,
+    onManage: () -> Unit,
 ) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text("${cityName}漫游", style = MaterialTheme.typography.headlineSmall)
-            Text("让每一天，都按自己的节奏", style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("我的${cityName}漫游", style = MaterialTheme.typography.headlineSmall)
         }
-        TextButton(onClick = onPickCity) {
-            Icon(Icons.Filled.EditLocation, null, Modifier.size(18.dp))
-            Spacer(Modifier.width(4.dp)); Text("换城市")
+        if (onWeather != null) TextButton(onClick = onWeather) {
+            Icon(androidx.compose.material.icons.Icons.Outlined.WbSunny, null, Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp)); Text("天气")
         }
+        IconButton(onClick = onManage) { Icon(androidx.compose.material.icons.Icons.Outlined.MoreHoriz, "行程管理") }
+
     }
 }
 
@@ -657,26 +696,15 @@ private fun PlanOverviewHeader(
     onPetFriendlyChange: (Boolean) -> Unit,
     onGenerateAiPlan: () -> Unit,
 ) {
-    Card(shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(if (hasPlaces) "$days 天 · $pointCount 个地点" else "你的下一段旅行", style = MaterialTheme.typography.titleMedium)
-                    Text(if (hasPlaces) "查看路线，或让 AI 调整安排" else "选择偏好，生成专属城市行程",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (hasPlaces) IconButton(onClick = onViewMapPoints) { Icon(Icons.Filled.Map, "查看地图点位", tint = MaterialTheme.colorScheme.primary) }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("优先宠物友好地点", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                androidx.compose.material3.Switch(checked = isPetFriendly, onCheckedChange = onPetFriendlyChange, enabled = !isAiGenerating)
-            }
-            Button(onClick = onGenerateAiPlan, enabled = !isAiGenerating, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                Icon(Icons.Filled.AutoAwesome, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
-                Text(if (isAiGenerating) "正在提交…" else if (hasPlaces) "重新规划旅行" else "AI 规划我的旅行")
-            }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(if (hasPlaces) "$days 天 · $pointCount 个地点" else "还没有旅行安排",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        TextButton(onClick = onGenerateAiPlan, enabled = !isAiGenerating,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+            Icon(Icons.Filled.AutoAwesome, null, Modifier.size(16.dp)); Spacer(Modifier.width(5.dp))
+            Text(if (isAiGenerating) "正在提交…" else if (hasPlaces) "重新规划" else "AI 规划旅行")
         }
     }
 }
@@ -704,35 +732,12 @@ private fun DayPlanCard(
 ) {
     Card(
         shape = RoundedCornerShape(18.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(vertical = 12.dp)) {
             // 日期头
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                ) {
-                    Text(
-                        text = "D$day",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = "第 $day 天 · ${points.size} 个点位",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            Spacer(Modifier.height(10.dp))
-
-            // 当日景点列表（时间线样式：左侧序号圆点 + 竖线；整行可点击跳地图定位；右侧可移除）
             points.forEachIndexed { index, point ->
                 PointTimelineRow(
                     point = point,
@@ -777,113 +782,61 @@ private fun PointTimelineRow(
     onClick: () -> Unit,
     onRemove: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(
-                if (highlighted) {
-                    Modifier
-                        .background(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
-                            RoundedCornerShape(12.dp),
-                        )
-                        .border(
-                            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
-                            RoundedCornerShape(12.dp),
-                        )
-                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                } else {
-                    Modifier
-                },
-            )
-            .clickable(onClick = onClick),
-    ) {
-        // 左侧时间线：类型圆点 + 连接竖线
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.width(36.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .background(point.placeType.color.copy(alpha = 0.15f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(text = point.placeType.emoji, style = MaterialTheme.typography.titleMedium)
-            }
-            if (showLine) {
-                Box(
-                    modifier = Modifier
-                        .width(2.dp)
-                        .height(34.dp)
-                        .background(MaterialTheme.colorScheme.outlineVariant),
-                )
-            }
-        }
-
-        Spacer(Modifier.width(8.dp))
-
-        // 右侧景点信息
-        Column(modifier = Modifier
-            .weight(1f)
-            .padding(bottom = if (showLine) 10.dp else 0.dp)) {
-            // 仅 UI 层字符串拆分（不改数据 / 接口）：后端可能把「名称 + 时间 + 门票 + 介绍…」
-            // 塞在同一条文本里，这里把纯地点名剥给标题，其余内容全部切到下方独立描述块。
-            val cardContent = remember(point) { splitPointCardText(point) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    // 主标题【仅地点名称】：已剔除上午/中午/下午前缀与时间/门票/介绍等详情
-                    text = cardContent.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(6.dp))
-                // 来源标签：数据库预置点位【本地库推荐】/ AI 额外拓展点位【AI生成推荐】
-                // Tags sit on their own line below the title.
-                // 移除该景点：独立点击区域，不触发整行的地图跳转
-                IconButton(
-                    onClick = onRemove,
-                    modifier = Modifier.size(30.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Close,
-                        contentDescription = "移除该景点",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(17.dp),
-                    )
-                }
-            }
-            // ② 独立描述块（在标题下方，不是标题！）：
-            //    从原拼接长文本拆出的全部详情 + 结构化字段，逐条分行、自动换行、不省略；
-            //    没有的字段自动隐藏，不留空行；图片在描述块之后（见下方）。
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SourceTag(fromLocalDb = point.fromLocalDb)
-                PointTypeTag(placeType = point.placeType)
-            }
-            var detailsExpanded by remember(point.id) { mutableStateOf(false) }
-            TextButton(onClick = { detailsExpanded = !detailsExpanded }, contentPadding = PaddingValues(0.dp)) {
-                Text(if (detailsExpanded) "收起地点详情" else "查看介绍与游玩提示", style = MaterialTheme.typography.labelMedium)
-            }
-            if (detailsExpanded) SpotExtraInfoRows(point = point, parsed = cardContent)
-            // AI 地点实拍图：只有搜到图的地点才渲染（无图 / 手动加入的地点布局保持原样）；
-            // CommunityImage 内置加载中转圈与「图片加载失败」默认占位图
-            if (coverUrl != null) {
+    var expanded by remember(point.id) { mutableStateOf(false) }
+    var showActions by remember(point.id) { mutableStateOf(false) }
+    var confirmRemove by remember(point.id) { mutableStateOf(false) }
+    val content = remember(point) { splitPointCardText(point) }
+    Column(Modifier.fillMaxWidth().background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        RoundedCornerShape(12.dp))) {
+        Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp)) {
+            Column(Modifier.width(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Spacer(Modifier.height(6.dp))
-                CommunityImage(
-                    data = coverUrl,
-                    fit = ImageFit.Fill,
-                    cornerShape = RoundedCornerShape(12.dp),
-                    contentDescription = cardContent.title,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(110.dp),
-                )
+                Box(Modifier.size(9.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+                if (showLine) Box(Modifier.width(1.dp).height(100.dp).background(MaterialTheme.colorScheme.outlineVariant))
+            }
+            Text(point.timeSlot?.substringBefore("-")?.substringBefore("—")?.trim().orEmpty(),
+                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.width(46.dp).padding(top = 2.dp))
+            if (coverUrl != null) {
+                CommunityImage(data = coverUrl, fit = ImageFit.Fill, cornerShape = RoundedCornerShape(12.dp),
+                    contentDescription = content.title, modifier = Modifier.width(54.dp).height(72.dp))
+                Spacer(Modifier.width(10.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(content.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Box {
+                        IconButton(onClick = { showActions = true }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Outlined.MoreHoriz, "地点操作：${content.title}", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        androidx.compose.material3.DropdownMenu(showActions, { showActions = false }) {
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("在地图上查看") }, onClick = { showActions = false; onClick() })
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("移除该景点", color = MaterialTheme.colorScheme.error) },
+                                onClick = { showActions = false; confirmRemove = true })
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    PointTypeTag(point.placeType)
+                    if (point.petFriendly) Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(50)) {
+                        Text("携宠推荐", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+                    }
+                }
+                val intro = content.details["介绍"] ?: point.intro
+                if (intro.isNotBlank()) Text(intro, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(if (expanded) "收起详情" else "游玩提示与详情 ›", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { expanded = !expanded }.padding(vertical = 5.dp))
             }
         }
+        if (expanded) Box(Modifier.padding(start = 20.dp, bottom = 10.dp)) { SpotExtraInfoRows(point, content) }
     }
+    if (confirmRemove) AlertDialog(onDismissRequest = { confirmRemove = false },
+        title = { Text("移除这个地点？") }, text = { Text("将从当前行程移除「${content.title}」。") },
+        confirmButton = { TextButton(onClick = { confirmRemove = false; onRemove() }) { Text("移除", color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("取消") } })
 }
 
 /** 地点类型小标签：严格四类【景点】/【餐饮】/【住宿】/【购物】，随类型配色 */
@@ -1046,7 +999,7 @@ private fun SpotExtraInfoRows(point: Place, parsed: ParsedPointCard) {
     val intro = point.intro.takeIf { it.isNotBlank() }
     // 定位参考始终由坐标生成（保留 mockedCoord「未精确命中」提示），不采用标题里拆出的旧文案
     val locationValue = if (point.mockedCoord) {
-        "高德未精确命中，点位已保留（城市参考坐标）"
+        "位置待核实，行程条目已保留；请先校准地点再导航"
     } else {
         "${point.lat}, ${point.lng}"
     }

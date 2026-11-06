@@ -15,13 +15,19 @@ data class RecommendUiState(val loading: Boolean = false, val cities: List<Strin
     val currentCity: String = CITY_ALL, val spots: List<ScenicSpot> = emptyList(), val errorMessage: String? = null,
     val loadingMore: Boolean = false, val hasMore: Boolean = false, val source: String = "LOCAL",
     val total: Long? = null, val categoryCode: String? = null, val ticketStatus: String? = null,
-    val petPolicy: String? = null, val cityQuery: String? = null)
+    val petPolicy: String? = null, val cityQuery: String? = null,
+    val heroPhotoUrl: String? = null, val heroSpotName: String? = null)
 data class SpotSearchUiState(val keyword: String = "", val loading: Boolean = false, val searched: Boolean = false,
     val results: List<ScenicSpot> = emptyList(), val suggestions: List<String> = emptyList(),
-    val errorMessage: String? = null, val loadingMore: Boolean = false, val hasMore: Boolean = false)
+    val errorMessage: String? = null, val loadingMore: Boolean = false, val hasMore: Boolean = false,
+    val city: String? = null)
 data class SpotDetailLoadState(val loading: Boolean = false, val error: String? = null)
 
-class RecommendViewModel(private val spotRepository: BackendSpotRepository = RepositoryContainer.spotRepository) : ViewModel() {
+class RecommendViewModel(
+    private val spotRepository: BackendSpotRepository = RepositoryContainer.spotRepository,
+    private val accountTokens: Flow<String?> = AccountSession.currentAccount.map { it?.token },
+    private val scopeOverride: CoroutineScope? = null,
+) : ViewModel() {
     private val _uiState = MutableStateFlow(RecommendUiState())
     val uiState = _uiState.asStateFlow()
     private val _searchState = MutableStateFlow(SpotSearchUiState())
@@ -32,6 +38,9 @@ class RecommendViewModel(private val spotRepository: BackendSpotRepository = Rep
     val detailLoads = _detailLoads.asStateFlow()
     private var accountScope: CoroutineScope? = null
     private var cityJob: Job? = null
+    private var heroJob: Job? = null
+    private val tripBinding = DiscoveryTripBinding()
+    private var activeTripCity: String? = null
     private var searchJob: Job? = null
     private val detailJobs = mutableMapOf<String, Job>()
     private val photoJobs = mutableMapOf<String, Job>()
@@ -39,17 +48,20 @@ class RecommendViewModel(private val spotRepository: BackendSpotRepository = Rep
     private var feedPage = 0
     private var searchPage = 0
     private var submittedKeyword = ""
+    private var searchCity: String? = null
     private var nearbyCenter: Pair<Double, Double>? = null
 
     init {
-        viewModelScope.launch {
-            AccountSession.currentAccount.map { it?.token }.distinctUntilChanged().collectLatest { token ->
+        (scopeOverride ?: viewModelScope).launch {
+            accountTokens.distinctUntilChanged().collectLatest { token ->
                 coroutineScope {
                     accountScope = this
                     _spotMap.value = emptyMap()
                     _detailLoads.value = emptyMap()
                     _searchState.value = SpotSearchUiState()
-                    _uiState.value = RecommendUiState(cities = listOf(CITY_ALL) + spotRepository.getCities())
+                    searchCity = null
+                    _uiState.value = RecommendUiState(cities = listOf(CITY_ALL) + spotRepository.getCities(),
+                        currentCity = activeTripCity ?: CITY_ALL)
                     nearbyCenter = null
                     feedPage = 0
                     searchPage = 0
@@ -62,8 +74,39 @@ class RecommendViewModel(private val spotRepository: BackendSpotRepository = Rep
         }
     }
     fun selectCity(city: String) {
-        _uiState.update { it.copy(currentCity = city, source = "LOCAL", cityQuery = null) }
+        heroJob?.cancel()
+        _uiState.update { it.copy(currentCity = city, source = "LOCAL", cityQuery = null,
+            spots = emptyList(), heroPhotoUrl = null, heroSpotName = null) }
         refresh()
+        if (hasFilters(_uiState.value)) loadCityHero(city)
+    }
+    fun syncActiveTrip(tripId: String?, city: String, hasPlaces: Boolean) {
+        activeTripCity = city.trim().takeIf { hasPlaces && it.isNotEmpty() && it != CITY_ALL }
+        tripBinding.destinationFor(tripId, city, hasPlaces)?.let { destination ->
+            // A new itinerary starts with the destination's full recommendations, not old nearby/filter state.
+            _uiState.update { it.copy(categoryCode = null, ticketStatus = null, petPolicy = null) }
+            nearbyCenter = null
+            selectCity(destination)
+        }
+    }
+    private fun hasFilters(state: RecommendUiState) = state.categoryCode != null || state.ticketStatus != null || state.petPolicy != null
+    private fun applyHero(city: String, spots: List<ScenicSpot>) {
+        val hero = discoveryCityHero(city, spots)
+        _uiState.update { if (it.currentCity != city) it else it.copy(heroPhotoUrl = hero?.coverImg, heroSpotName = hero?.name) }
+    }
+    private fun loadCityHero(city: String) {
+        val scope = accountScope ?: return
+        heroJob?.cancel()
+        heroJob = scope.launch {
+            try {
+                val curated = spotRepository.recommendations(city).spots
+                val photos = if (discoveryCityHero(city, curated) == null && city != CITY_ALL)
+                    spotRepository.cityDiscoveries(city).spots else curated
+                applyHero(city, photos)
+            }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* Keep a neutral city illustration rather than another city's photo. */ }
+        }
     }
     fun setFilters(category: String?, ticket: String?, pet: String?) {
         _uiState.update { it.copy(categoryCode = category, ticketStatus = ticket, petPolicy = pet,
@@ -87,13 +130,20 @@ class RecommendViewModel(private val spotRepository: BackendSpotRepository = Rep
             spots = if (reset) emptyList() else it.spots) }
         cityJob = scope.launch {
             try {
-                val result = if (state.source == "NEARBY") {
+                var result = if (state.source == "NEARBY") {
                     val center = nearbyCenter ?: throw IllegalStateException("请先获取当前位置")
                     spotRepository.nearby(center.first, center.second, page = next)
+                } else if (state.source == "CITY_SEARCH" && !hasFilters(state)) {
+                    spotRepository.cityDiscoveries(state.currentCity, next)
                 } else spotRepository.recommendations(state.currentCity, next, state.categoryCode,
                     state.ticketStatus, state.petPolicy, if (reset) null else state.source,
                     if (reset) null else state.cityQuery)
+                if (reset && result.spots.isEmpty() && state.source != "NEARBY" &&
+                    state.currentCity != CITY_ALL && !hasFilters(state) && result.source != "CITY_SEARCH") {
+                    result = spotRepository.cityDiscoveries(state.currentCity)
+                }
                 index(result.spots)
+                if (reset && state.source != "NEARBY" && !hasFilters(state)) applyHero(state.currentCity, result.spots)
                 feedPage = result.nextPage?.minus(1) ?: next
                 _uiState.update { it.copy(loading = false, loadingMore = false,
                     spots = (if (reset) result.spots else it.spots + result.spots).distinctBy(ScenicSpot::spotId),
@@ -159,15 +209,21 @@ class RecommendViewModel(private val spotRepository: BackendSpotRepository = Rep
     }
     fun onSearchInputChanged(keyword: String) {
         val suggestions = if (keyword.isBlank()) emptyList() else _spotMap.value.values
+            .filter { searchCity == null || normalizeDiscoveryCity(it.city) == normalizeDiscoveryCity(searchCity!!) }
             .map(ScenicSpot::name).distinct().filter { it.contains(keyword.trim()) }.take(6)
         _searchState.update { it.copy(keyword = keyword, suggestions = suggestions) }
+    }
+    fun prepareSearch(city: String = _uiState.value.currentCity) {
+        searchJob?.cancel()
+        searchCity = city.takeUnless { it == CITY_ALL || it.isBlank() }
+        _searchState.value = SpotSearchUiState(city = searchCity)
     }
     fun submitSearch(rawKeyword: String) {
         val keyword = rawKeyword.trim()
         if (keyword.isBlank()) return
         submittedKeyword = keyword
         searchPage = 0
-        _searchState.value = SpotSearchUiState(keyword = keyword, searched = true)
+        _searchState.value = SpotSearchUiState(keyword = keyword, searched = true, city = searchCity)
         loadSearch(reset = true)
     }
     fun loadMoreSearch() = loadSearch(reset = false)
@@ -180,7 +236,7 @@ class RecommendViewModel(private val spotRepository: BackendSpotRepository = Rep
         _searchState.update { it.copy(loading = reset, loadingMore = !reset, errorMessage = null, suggestions = emptyList()) }
         searchJob = scope.launch {
             try {
-                val result = spotRepository.searchPage(submittedKeyword, next)
+                val result = spotRepository.searchPage(submittedKeyword, next, city = state.city)
                 index(result.spots)
                 searchPage = next
                 _searchState.update { it.copy(loading = false, loadingMore = false,
@@ -192,7 +248,7 @@ class RecommendViewModel(private val spotRepository: BackendSpotRepository = Rep
     }
     fun retrySearch() = submitSearch(submittedKeyword.ifBlank { _searchState.value.keyword })
     fun applySuggestion(name: String) = submitSearch(name)
-    fun resetSearch() { searchJob?.cancel(); _searchState.value = SpotSearchUiState() }
+    fun resetSearch() { searchJob?.cancel(); _searchState.value = SpotSearchUiState(city = searchCity) }
     suspend fun navigationTarget(id: String, mode: String) = spotRepository.navigation(id, mode)
 }
 

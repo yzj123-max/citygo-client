@@ -45,6 +45,13 @@ fun SpotDetailScreen(spotId: String, onBack: () -> Unit, onViewArticles: (String
     val plan by appViewModel.currentTravelPlan.collectAsStateWithLifecycle()
     val pendingDay by appViewModel.pendingAddDay.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var confirmCrossCity by remember(spotId) { mutableStateOf(false) }
+    fun addCurrentSpot() {
+        val item = spot ?: return
+        appViewModel.addSpotToPlan(item.toSharedSpot())
+        Toast.makeText(context, pendingDay?.let { "已加入第${it}天行程" } ?: "已加入行程", Toast.LENGTH_SHORT).show()
+        onGoToPlan?.invoke()
+    }
     LaunchedEffect(spot?.spotId) { spot?.let { appViewModel.addBrowseHistory(it.toSharedSpot()) } }
     Scaffold(modifier = modifier.fillMaxSize(), topBar = {
         TopAppBar(title = { Text(spot?.name ?: "景点详情") }, navigationIcon = {
@@ -63,9 +70,9 @@ fun SpotDetailScreen(spotId: String, onBack: () -> Unit, onViewArticles: (String
             Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 18.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 val added = plan.allPlaceList.any { it.name == spot.name && it.lat == spot.lat && it.lng == spot.lng }
                 OutlinedButton(modifier = Modifier.weight(1f), enabled = spot.coordinateAvailable && !added, onClick = {
-                    appViewModel.addSpotToPlan(spot.toSharedSpot())
-                    Toast.makeText(context, pendingDay?.let { "已加入第${it}天行程" } ?: "已加入行程", Toast.LENGTH_SHORT).show()
-                    onGoToPlan?.invoke()
+                    if (plan.allPlaceList.isNotEmpty() && spot.city.isNotBlank() &&
+                        plan.destination.removeSuffix("市") != spot.city.removeSuffix("市")) confirmCrossCity = true
+                    else addCurrentSpot()
                 }) { Text(if (added) "已加入" else "加入行程") }
                 Button(modifier = Modifier.weight(1f), enabled = spot.canNavigate, onClick = { onNavigate(spot.spotId) }) { Text("去导航") }
             }
@@ -117,6 +124,13 @@ fun SpotDetailScreen(spotId: String, onBack: () -> Unit, onViewArticles: (String
             } }
         }
     }
+    if (confirmCrossCity && spot != null) AlertDialog(
+        onDismissRequest = { confirmCrossCity = false },
+        title = { Text("加入当前行程？") },
+        text = { Text("该景点位于${spot.city}，当前行程目的地为${plan.destination}。确认将它加入当前行程吗？") },
+        confirmButton = { TextButton(onClick = { confirmCrossCity = false; addCurrentSpot() }) { Text("加入行程") } },
+        dismissButton = { TextButton(onClick = { confirmCrossCity = false }) { Text("取消") } },
+    )
 }
 
 @Composable

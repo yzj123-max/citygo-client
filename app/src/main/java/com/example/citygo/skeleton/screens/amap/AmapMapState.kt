@@ -15,8 +15,10 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -125,6 +127,22 @@ private const val PET_BADGE_EMOJI = "🐾"
 class PlaceMarkerIconFactory {
 
     private val cache = HashMap<String, BitmapDescriptor>()
+
+    fun numbered(number: Int, role: MarkerRole): BitmapDescriptor = cache.getOrPut("number:$number:$role") {
+        val size = if (role == MarkerRole.NORMAL) 72 else 88
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val center = size / 2f
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE }
+        canvas.drawCircle(center, center, center - 2, paint)
+        paint.color = if (role == MarkerRole.ROUTE_END) 0xFFB44A40.toInt() else 0xFF205B46.toInt()
+        canvas.drawCircle(center, center, center - 7, paint)
+        paint.color = android.graphics.Color.WHITE
+        paint.textAlign = Paint.Align.CENTER
+        paint.textSize = size * .45f
+        canvas.drawText("$number", center, center - (paint.ascent() + paint.descent()) / 2, paint)
+        BitmapDescriptorFactory.fromBitmap(bitmap).also { bitmap.recycle() }
+    }
 
     /** 兼容旧调用：selected=true 对应 [MarkerRole.SELECTED] */
     fun get(place: Place, selected: Boolean): BitmapDescriptor =
@@ -254,9 +272,19 @@ class AmapMapState {
 
     private var aMap: AMap? = null
 
-    /** 地图是否已完成首帧初始化（Marker / 相机操作必须在此之后） */
+    /** 原生地图实例已绑定；行程绘制和视野适配另需等待 mapLoaded 与有效布局尺寸。 */
     var mapReady by mutableStateOf(false)
         private set
+    var mapLoaded by mutableStateOf(false)
+        private set
+    var viewportWidth by mutableStateOf(0)
+        private set
+    var viewportHeight by mutableStateOf(0)
+        private set
+    fun updateViewport(width: Int, height: Int) {
+        viewportWidth = width
+        viewportHeight = height
+    }
 
     /**
      * 「我的位置」蓝点的最新坐标（GCJ-02），由地图 SDK 内置定位源回调驱动。
@@ -295,6 +323,8 @@ class AmapMapState {
         try {
             val map = mapView.map
             aMap = map
+            mapLoaded = false
+            map.setOnMapLoadedListener { if (aMap === map) mapLoaded = true }
             map.uiSettings.apply {
                 // 使用自定义悬浮按钮组，关闭 SDK 自带缩放 / 定位按钮
                 isZoomControlsEnabled = false
@@ -360,6 +390,7 @@ class AmapMapState {
         runCatching { aMap?.setOnMyLocationChangeListener(null) }
         aMap = null
         mapReady = false
+        mapLoaded = false
         myLocationLatLng = null
     }
 
@@ -379,7 +410,7 @@ class AmapMapState {
         val map = aMap ?: return
         placeMarkers.values.forEach { runCatching { it.remove() } }
         placeMarkers.clear()
-        points.forEach { place ->
+        points.forEachIndexed { index, place ->
             val role = when (place.id) {
                 routeStartId -> MarkerRole.ROUTE_START
                 routeEndId -> MarkerRole.ROUTE_END
@@ -390,10 +421,10 @@ class AmapMapState {
             val marker = map.addMarker(
                 MarkerOptions()
                     .position(LatLng(place.lat, place.lng))
-                    .icon(iconFactory.get(place, role))
+                    .icon(iconFactory.numbered(index + 1, role))
                     .anchor(0.5f, 0.5f)
                     .zIndex(if (emphasized) 10f else 1f),
-            ) ?: return@forEach
+            ) ?: return@forEachIndexed
             marker.setObject(place.id)
             placeMarkers[place.id] = marker
         }
@@ -433,21 +464,50 @@ class AmapMapState {
      * 把全部点位完整放入视野。
      * 单点时直接给 15 级缩放；多点用外接矩形 + padding 适配。
      */
-    fun fitPoints(points: List<Place>, paddingPx: Int) {
-        val map = aMap ?: return
-        when {
-            points.isEmpty() -> return
-            points.size == 1 -> animateTo(CameraTarget(points[0].lat, points[0].lng, 15f))
-            else -> {
+    fun fitPoints(points: List<Place>, paddingPx: Int,
+        topPaddingPx: Int = paddingPx, bottomPaddingPx: Int = paddingPx): Boolean {
+        val map = aMap ?: return false
+        if (!mapLoaded || viewportWidth <= 0 || viewportHeight <= 0 || points.isEmpty()) return false
+        return runCatching {
+            if (points.size == 1) moveTo(CameraTarget(points[0].lat, points[0].lng, 15f))
+            else {
                 val builder = LatLngBounds.builder()
                 points.forEach { builder.include(LatLng(it.lat, it.lng)) }
-                runCatching {
-                    map.animateCamera(
-                        CameraUpdateFactory.newLatLngBounds(builder.build(), paddingPx),
-                    )
-                }
+                map.moveCamera(CameraUpdateFactory.newLatLngBoundsRect(builder.build(), paddingPx,
+                    paddingPx, topPaddingPx, bottomPaddingPx))
             }
+            true
+        }.onFailure { Log.w(TAG, "Unable to fit itinerary viewport", it) }.getOrDefault(false)
+    }
+
+    /** Read-only itinerary overview: real map tiles and numbered stops, without a simulated road route. */
+    fun renderItineraryPreview(points: List<Place>, width: Int, height: Int) {
+        val map = aMap ?: return
+        if (points.isEmpty() || width <= 0 || height <= 0) return
+        map.uiSettings.setAllGesturesEnabled(false)
+        placeMarkers.values.forEach { it.remove() }
+        placeMarkers.clear()
+        points.forEachIndexed { index, place ->
+            val bitmap = Bitmap.createBitmap(60, 60, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+            paint.color = android.graphics.Color.WHITE
+            canvas.drawCircle(30f, 30f, 29f, paint)
+            paint.color = 0xFF205B46.toInt()
+            canvas.drawCircle(30f, 30f, 25f, paint)
+            paint.color = android.graphics.Color.WHITE
+            paint.textSize = 27f
+            paint.textAlign = Paint.Align.CENTER
+            canvas.drawText("${index + 1}", 30f, 40f, paint)
+            map.addMarker(MarkerOptions().position(LatLng(place.lat, place.lng))
+                .anchor(.5f, .5f).icon(BitmapDescriptorFactory.fromBitmap(bitmap)))?.let {
+                placeMarkers[place.id] = it
+            }
+            bitmap.recycle()
         }
+        val bounds = LatLngBounds.builder().apply { points.forEach { include(LatLng(it.lat, it.lng)) } }.build()
+        if (points.size == 1) moveTo(CameraTarget(points.first().lat, points.first().lng, 13f))
+        else runCatching { map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds, width, height, 56)) }
     }
 
     /** 绘制驾车路线（蓝色粗折线），重复调用会先清除上一条 */
@@ -525,7 +585,12 @@ class AmapMapState {
 
     /** 开启 / 关闭「我的位置」蓝点图层（SDK 内部定位源） */
     fun setMyLocationEnabled(enabled: Boolean) {
-        runCatching { aMap?.isMyLocationEnabled = enabled }
+        runCatching {
+            // Show the location dot without replacing the itinerary camera with the GPS position.
+            aMap?.myLocationStyle = com.amap.api.maps.model.MyLocationStyle()
+                .myLocationType(com.amap.api.maps.model.MyLocationStyle.LOCATION_TYPE_SHOW)
+            aMap?.isMyLocationEnabled = enabled
+        }
     }
 
     /**
@@ -566,7 +631,7 @@ fun AmapMapBox(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     // TextureMapView 只创建一次；创建 / onCreate 失败（含 UnsatisfiedLinkError）时返回 null
-    val mapView = remember {
+    val mapView = remember(lifecycleOwner) {
         runCatching {
             TextureMapView(context).apply { onCreate(Bundle()) }
         }.onFailure {
@@ -580,7 +645,7 @@ fun AmapMapBox(
     }
 
     // 保证 onPause/onDestroy 只执行一次（页面销毁与组合销毁可能同时发生）
-    val releaseGuard = remember { booleanArrayOf(false) }
+    val releaseGuard = remember(mapView) { booleanArrayOf(false) }
 
     DisposableEffect(lifecycleOwner, mapView) {
         val observer = LifecycleEventObserver { _, event ->
@@ -606,8 +671,9 @@ fun AmapMapBox(
         }
     }
 
+    key(mapView) {
     AndroidView(
-        modifier = modifier,
+        modifier = modifier.onSizeChanged { mapState.updateViewport(it.width, it.height) },
         factory = { mapView },
         update = { view ->
             if (!mapState.mapReady && !mapState.initFailed) {
@@ -616,6 +682,7 @@ fun AmapMapBox(
             }
         },
     )
+    }
 }
 
 /** 释放地图资源（onPause + onDestroy + 解绑状态），幂等。 */

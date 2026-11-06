@@ -24,14 +24,26 @@ import com.example.citygo.skeleton.data.remote.StrictGeocodeResult
  *      直到出现新的「第X天」标题才恢复）；
  *   5. 非字段、非点位的杂项「- 」行（如「交通：地铁2号线」「地址：…」）挂载到
  *      上一点位的出行要点补充信息，不会凭空生成点位（对齐"不能新增"）；
- *   6. 坐标逐个【串行】高德地理编码（city 必传）；查不到的点位使用城市中心兜底坐标，
- *      点位照样生成卡片与 Marker（卡片标「定位参考」），保证点位数量与原文一致。
+ *   6. 坐标逐个【串行】高德检索（city 必传）；未匹配地点保留行程卡片和待核实标记，
+ *      不在地图上绘制未经核实的位置，也不允许用于导航。
  *
  * 全程在 ViewModel 的 viewModelScope 中执行（调用方保证），切页面 / 返回不取消。
  * ===================================================================================== */
 class GuideSpotGeocodeImporter(
     private val geocoder: AmapGeocoder,
 ) {
+
+    /** 旧行程只校准未精确匹配的地点；查不到时保留原资料和未核实标记。 */
+    suspend fun repairPlace(place: com.example.citygo.skeleton.data.model.Place, city: String): com.example.citygo.skeleton.data.model.Place {
+        val block = parseBlocks("- ${place.name}").firstOrNull() ?: return place
+        val result = geocoder.geocodeStrict(block.name, city)
+        val point = (result as? StrictGeocodeResult.Success)?.point ?: return place
+        return place.copy(name = block.name, lat = point.lat, lng = point.lng, mockedCoord = false,
+            ticket = place.ticket ?: block.ticket, avgPrice = place.avgPrice ?: block.avgPrice,
+            signatureDish = place.signatureDish ?: block.signatureDish,
+            intro = place.intro.ifBlank { buildDesc(block) },
+            travelTip = listOfNotNull(place.travelTip, mergeTravelTip(block)).distinct().joinToString("\n").ifBlank { null })
+    }
 
     /** 从文本中解析出的单个地点块（尚未地理编码） */
     private data class RawBlock(
@@ -180,10 +192,10 @@ class GuideSpotGeocodeImporter(
             StrictGeocodeResult.Timeout -> "地理编码超时"
             else -> "地理编码失败"
         }
-        Log.w(TAG, "地点「$name」高德未命中（$reason），使用城市中心兜底坐标保留该点位")
+        Log.w(TAG, "地点「$name」高德未命中（$reason），保留条目并标为位置待核实")
         failures += name to reason
-        // 非严格编码：内部会再试一次高德，仍失败则返回城市中心附近的确定性兜底坐标
-        return geocoder.geocode(name = name, city = city)
+        // 保留行程条目，但不再编造城市中心附近的坐标。地图会过滤未核实点位。
+        return GeocodeResultPoint(0.0, 0.0, true)
     }
 
     /* ------------------------------ Markdown 全量解析 ------------------------------ */
@@ -271,7 +283,8 @@ class GuideSpotGeocodeImporter(
             // 5) 其余每一条「- 」都是独立点位（景点 / 餐厅 / 商圈 / 酒店一律保留）。
             //    例外：纯日程行（整条只有「午餐12:30」「上午9:00-12:00」，没有点名）
             //    属于上一点位的【时间段】，挂到上一点位，不生成"午餐"这种假点位。
-            val parsed = parsePointLine(content)
+            val (pointContent, inlineDetails) = GuideInlineEntry.split(content)
+            val parsed = parsePointLine(pointContent)
             val scheduleOnly = parsed.time != null &&
                 (parsed.name.isBlank() || parsed.name in MEAL_WORDS)
             if (scheduleOnly) {
@@ -293,6 +306,11 @@ class GuideSpotGeocodeImporter(
             )
             // 点名行内自带的时间段（午餐12:30 / 上午9:00-12:00）
             parsed.time?.let { block.timeSlot = it }
+            inlineDetails.forEach { detail ->
+                val field = matchField(detail)
+                if (field != null) assignField(block, field.first, field.second)
+                else block.extraTips += detail
+            }
             blocks += block
             current = block
         }
@@ -611,7 +629,7 @@ class GuideSpotGeocodeImporter(
         private val SOURCE_LABELS = listOf("推荐来源", "来源", "出处")
         private val PET_LABELS = listOf("宠物友好", "宠物", "携宠", "带宠")
         private val DESC_LABELS = listOf(
-            "简介", "介绍", "描述", "备注", "说明", "亮点", "推荐理由",
+            "简介", "介绍", "描述", "备注", "说明", "亮点", "特色", "推荐理由",
         )
         /** 杂项配套字段：不作为点位，挂到上一点位的补充信息里展示 */
         private val EXTRA_INFO_LABELS = listOf(

@@ -100,7 +100,7 @@ fun StylistScreen(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("AI 穿搭评估") },
+                title = { Text("结合行程的多图评估") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -117,9 +117,6 @@ fun StylistScreen(
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // ① 当前行程景点（评估上下文，只读）
-            TripContextCard(tripPlan)
-
             // ② 穿搭照片选择
             PhotoPickerCard(
                 images = state.images,
@@ -132,12 +129,15 @@ fun StylistScreen(
                 onRemove = viewModel::removeImage,
             )
 
+            TripContextCard(tripPlan)
+
             // ③ 提问（预填后端样例问题，可改）
             OutlinedTextField(
                 value = state.userQuery,
                 onValueChange = viewModel::updateQuery,
                 enabled = !state.busy,
-                label = { Text("想让 AI 评估什么？") },
+                label = { Text("还有其他想补充的吗？") },
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 2,
             )
@@ -153,14 +153,14 @@ fun StylistScreen(
                 StylistPhase.STREAMING -> "AI 正在综合匹配穿搭与景点…"
                 StylistPhase.DONE -> "重新评估"
                 StylistPhase.FAILED -> "重试评估"
-                StylistPhase.IDLE -> "上传照片并开始评估"
+                StylistPhase.IDLE -> "提交综合评估"
             }
             Button(
                 onClick = {
                     if (state.phase == StylistPhase.FAILED) viewModel.resetResult()
                     viewModel.evaluate(tripPlan)
                 },
-                enabled = !state.busy,
+                enabled = !state.busy && state.images.isNotEmpty() && tripPlan.allPlaces.isNotEmpty(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp),

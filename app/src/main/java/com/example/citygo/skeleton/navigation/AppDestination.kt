@@ -1,5 +1,11 @@
 package com.example.citygo.skeleton.navigation
 
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Map
@@ -41,24 +47,24 @@ sealed class AppDestination(
     data object Plan : AppDestination(
         route = ROUTE_PLAN,
         label = "行程",
-        selectedIcon = Icons.Filled.EditNote,
-        unselectedIcon = Icons.Outlined.EditNote,
+        selectedIcon = Icons.Filled.CalendarMonth,
+        unselectedIcon = Icons.Outlined.CalendarMonth,
     )
 
     /** 照片分享页 */
     data object Share : AppDestination(
         route = ROUTE_SHARE,
         label = "社区",
-        selectedIcon = Icons.Filled.PhotoLibrary,
-        unselectedIcon = Icons.Outlined.PhotoLibrary,
+        selectedIcon = Icons.Filled.ChatBubble,
+        unselectedIcon = Icons.Outlined.ChatBubbleOutline,
     )
 
     /** 景点推荐页 */
     data object Recommend : AppDestination(
         route = ROUTE_RECOMMEND,
         label = "发现",
-        selectedIcon = Icons.Filled.Recommend,
-        unselectedIcon = Icons.Outlined.Recommend,
+        selectedIcon = Icons.Filled.Explore,
+        unselectedIcon = Icons.Outlined.Explore,
     )
 
     /** 我的页面 */
@@ -89,6 +95,10 @@ sealed class AppDestination(
         /** OOTD 穿搭 AI 分析：拍照/相册选图 → 压缩上传 → SSE 流式分析（局域网 IP 联调） */
         const val ROUTE_OOTD_ANALYZE = "share/ootd"
         const val ROUTE_OUTFIT_TOOLS = "outfit_tools"
+        const val ROUTE_WEATHER_OVERVIEW = "weather/overview"
+        const val ROUTE_PET_PROFILES = "profile/pets"
+        const val ROUTE_TRAVEL_DIARIES = "profile/diaries"
+        const val ROUTE_MY_POSTS = "profile/my_posts"
 
         /** 构造游记详情跳转路径（id 做 URL 编码，防止特殊字符破坏路由） */
         fun articleDetailRoute(articleId: String): String =

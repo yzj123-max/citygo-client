@@ -34,7 +34,9 @@ object AttractionBackend {
 
 class BackendSpotRepository(private val apiFactory: () -> AttractionApi = { AttractionBackend.api() }) : SpotRepository {
     private val api get() = apiFactory()
-    private var recommendationCache: Pair<String, List<ScenicSpot>>? = null
+    private val recommendationCache = java.util.concurrent.ConcurrentHashMap<String, List<ScenicSpot>>()
+    private fun recommendationKey(city: String?, category: String?, ticket: String?, pet: String?) =
+        listOf(city?.takeUnless { it == CITY_ALL || it.isBlank() }, category, ticket, pet).joinToString("|")
     override suspend fun getScenicSpots(city: String?) = recommendations(city).spots
     override suspend fun getSpotById(spotId: String): ScenicSpot {
         val id = localId(spotId)
@@ -59,8 +61,8 @@ class BackendSpotRepository(private val apiFactory: () -> AttractionApi = { Attr
         val chosen = city?.takeUnless { it == CITY_ALL || it.isBlank() }
 
         var query = cityQuery ?: chosen
-        val cacheKey = listOf(chosen, category, ticket, pet).joinToString("|")
-        if (page > 1 && recommendationCache?.first == cacheKey) return cachedRecommendations(page, query)
+        val cacheKey = recommendationKey(chosen, category, ticket, pet)
+        if (page > 1) recommendationCache[cacheKey]?.let { return recommendationPage(it, page, query) }
         var result = api.list(query, category = category, ticket = ticket, pet = pet, size = 50).attractionData()
         // 兼容本地目录“贵阳”与数据库“贵阳市”的命名差异，不修改后端记录。
         if (source == null && page == 1 && result.total == 0L && chosen != null && !chosen.endsWith("市")) {
@@ -87,11 +89,10 @@ class BackendSpotRepository(private val apiFactory: () -> AttractionApi = { Attr
                 }
             } }.awaitAll().filterNotNull()
         }
-        recommendationCache = cacheKey to complete
-        return cachedRecommendations(page, query)
+        recommendationCache[cacheKey] = complete
+        return recommendationPage(complete, page, query)
     }
-    private fun cachedRecommendations(page: Int, query: String?): BackendSpotPage {
-        val pool = recommendationCache?.second.orEmpty()
+    private fun recommendationPage(pool: List<ScenicSpot>, page: Int, query: String?): BackendSpotPage {
         val start = ((page - 1) * 20).coerceAtMost(pool.size)
         val end = (start + 20).coerceAtMost(pool.size)
         return BackendSpotPage(pool.subList(start, end), end < pool.size,
@@ -110,6 +111,13 @@ class BackendSpotRepository(private val apiFactory: () -> AttractionApi = { Attr
         val result = api.search(keyword, city, page = page).attractionData()
         return BackendSpotPage(result.records.map(AttractionDisplayMapper::spot), result.hasMore, source = "SEARCH")
     }
+    /** Cities without curated content still expose real scenic search results, with unknown policies intact. */
+    suspend fun cityDiscoveries(city: String, page: Int = 1): BackendSpotPage {
+        require(city.isNotBlank() && city != CITY_ALL) { "请先选择城市" }
+        val result = api.search("风景名胜", city, page = page).attractionData()
+        return BackendSpotPage(AttractionRecommendationPolicy.select(result.records).map(AttractionDisplayMapper::spot),
+            result.hasMore, source = "CITY_SEARCH", cityQuery = city)
+    }
     suspend fun nearby(longitude: Double, latitude: Double, radius: Int = 20000, page: Int = 1): BackendSpotPage {
         require(AttractionDisplayMapper.validCoordinates(longitude, latitude, "GCJ02")) { "当前位置无效，请重新定位" }
         // 附近推荐使用与城市推荐相同的完整资料库，不再把原始POI直接当作精选。
@@ -120,7 +128,7 @@ class BackendSpotRepository(private val apiFactory: () -> AttractionApi = { Attr
             val h = kotlin.math.sin(da / 2).let { it * it } + kotlin.math.cos(a1) * kotlin.math.cos(a2) * kotlin.math.sin(dl / 2).let { it * it }
             return (6371000.0 * 2 * kotlin.math.asin(kotlin.math.sqrt(h.coerceIn(0.0, 1.0)))).toLong()
         }
-        val spots = recommendationCache?.second.orEmpty().map { it.copy(distanceMeters = distance(it)) }
+        val spots = recommendationCache[recommendationKey(CITY_ALL, null, null, null)].orEmpty().map { it.copy(distanceMeters = distance(it)) }
             .filter { it.distanceMeters!! <= radius }.sortedBy { it.distanceMeters }
         val start = ((page - 1) * 20).coerceAtMost(spots.size)
         val end = (start + 20).coerceAtMost(spots.size)

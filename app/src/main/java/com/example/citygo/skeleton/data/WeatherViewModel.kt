@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 
 /**
  * 天气预报页面状态（计划 Tab「天气预报」子页 + 单日天气详情页订阅）。
@@ -36,6 +38,7 @@ class WeatherViewModel : ViewModel() {
 
     private val _uiState = MutableStateFlow(WeatherUiState(loading = true))
     val uiState: StateFlow<WeatherUiState> = _uiState.asStateFlow()
+    private var loadJob: Job? = null
 
     init {
         // 默认加载长沙天气（与调试模拟 JSON 一致）
@@ -47,15 +50,19 @@ class WeatherViewModel : ViewModel() {
      * 切换城市调用本方法，页面全部模块随返回结果一次性刷新。
      */
     fun loadOverview(city: WeatherCity) {
-        _uiState.update { it.copy(city = city, loading = true, errorMessage = null) }
-        viewModelScope.launch {
+        loadJob?.cancel()
+        _uiState.update { it.copy(city = city, loading = true, overview = null, errorMessage = null) }
+        loadJob = viewModelScope.launch {
             runCatching { repository.getWeatherOverview(city) }
                 .onSuccess { overview ->
+                    if (_uiState.value.city.adCode != city.adCode) return@onSuccess
                     _uiState.update {
                         it.copy(loading = false, overview = overview, errorMessage = null)
                     }
                 }
                 .onFailure { e ->
+                    if (e is CancellationException) throw e
+                    if (_uiState.value.city.adCode != city.adCode) return@onFailure
                     _uiState.update {
                         it.copy(loading = false, errorMessage = e.message ?: "天气加载失败")
                     }

@@ -1,5 +1,8 @@
 package com.example.citygo.skeleton
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +47,9 @@ import com.example.citygo.skeleton.recommend.SpotRouteScreen
 import com.example.citygo.skeleton.recommend.SpotSearchScreen
 import com.example.citygo.skeleton.screens.ootd.OotdAnalyzeScreen
 import com.example.citygo.skeleton.screens.stylist.OutfitHubScreen
+import com.example.citygo.skeleton.screens.PetProfilesScreen
+import com.example.citygo.skeleton.screens.TravelDiariesScreen
+import com.example.citygo.skeleton.screens.WeatherOverviewScreen
 import com.example.citygo.skeleton.screens.MapScreen
 import com.example.citygo.skeleton.screens.NaviScreen
 import com.example.citygo.skeleton.screens.PlanScreen
@@ -91,6 +97,8 @@ fun SkeletonApp(
 ) {
     val navController = rememberNavController()
     var requestPlanning by remember { mutableStateOf(false) }
+    var planOverviewRequest by remember { mutableStateOf(0) }
+    var requestedPlanCity by remember { mutableStateOf<String?>(null) }
     // 全局行程状态由 globalAppVm（AppViewModel + Room）持有：
     // 【出行计划】展示的按天行程与【地图】渲染的 Marker / 相机联动是同一份 TravelPlan
     // 天气 ViewModel：出行计划页「天气预报」子页使用（数据走数据层 WeatherRepository）
@@ -109,6 +117,23 @@ fun SkeletonApp(
     // 预览等未下传场景按同一工厂取 Activity 作用域同一实例
     val globalAppVm: GlobalAppViewModel =
         globalAppViewModel ?: viewModel(factory = GlobalAppViewModel.factory())
+    val currentTrip by globalAppVm.tripPlan.collectAsStateWithLifecycle()
+    val currentTripSync by globalAppVm.tripSyncState.collectAsStateWithLifecycle()
+    val discoveryState by recommendViewModel.uiState.collectAsStateWithLifecycle()
+    val homeWeather by weatherViewModel.uiState.collectAsStateWithLifecycle()
+    LaunchedEffect(currentTripSync.activeTripId, currentTrip.city, currentTrip.isEmpty) {
+        recommendViewModel.syncActiveTrip(currentTripSync.activeTripId, currentTrip.city, !currentTrip.isEmpty)
+    }
+    LaunchedEffect(currentTripSync.activeTripId, currentTrip.petFriendly, currentTrip.isEmpty) {
+        if (!currentTrip.isEmpty) globalAppVm.setAiPetFriendlyPreferred(currentTrip.petFriendly)
+    }
+    fun alignWeatherCity(city: String): Boolean {
+        val match = com.example.citygo.skeleton.data.model.ALL_WEATHER_CITY_ENTRIES.firstOrNull {
+            it.name.removeSuffix("市") == city.removeSuffix("市")
+        } ?: return false
+        weatherViewModel.switchCity(match.toWeatherCity())
+        return true
+    }
     // 全局收藏（Room 持久化）：「我的收藏攻略 / 帖子」与详情页、社区卡片同源
     val collectSpots by globalAppVm.collectSpotList.collectAsStateWithLifecycle()
     val collectPosts by globalAppVm.collectPostList.collectAsStateWithLifecycle()
@@ -120,6 +145,13 @@ fun SkeletonApp(
 
     // AccountViewModel 的一次性 Toast（切换 /info 失败、退出结果等）
     val sheetContext = androidx.compose.ui.platform.LocalContext.current
+    fun openWeatherForCity(city: String) {
+        if (alignWeatherCity(city) || city == com.example.citygo.skeleton.data.repository.CITY_ALL) {
+            navController.navigate(AppDestination.ROUTE_WEATHER_OVERVIEW)
+        } else {
+            android.widget.Toast.makeText(sheetContext, "暂未支持${city}的天气查询", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
     LaunchedEffect(Unit) {
         accountViewModel.toastEvent.collect {
             android.widget.Toast.makeText(sheetContext, it, android.widget.Toast.LENGTH_SHORT).show()
@@ -129,6 +161,12 @@ fun SkeletonApp(
     // 观察当前返回栈栈顶：用于 Tab 选中态，以及判断是否为二级页（隐藏底部导航栏）
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = currentBackStackEntry?.destination
+    LaunchedEffect(currentDestination?.route, currentTrip.city, discoveryState.currentCity) {
+        when (currentDestination?.route) {
+            AppDestination.ROUTE_RECOMMEND -> alignWeatherCity(discoveryState.currentCity)
+            AppDestination.ROUTE_PLAN, AppDestination.ROUTE_MAP -> alignWeatherCity(currentTrip.city)
+        }
+    }
     // 仅当目的地属于 5 个底部 Tab 之一时显示底部导航栏
     val showBottomBar = AppDestination.bottomTabs.any { it.route == currentDestination?.route }
 
@@ -143,6 +181,7 @@ fun SkeletonApp(
 
     // 切换到「计划」Tab 的统一跳转（景点详情「加入行程」后可选跳转使用）
     val switchToPlanTab: () -> Unit = {
+        planOverviewRequest++
         navController.navigate(AppDestination.ROUTE_PLAN) {
             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
             launchSingleTop = true
@@ -161,6 +200,7 @@ fun SkeletonApp(
 
     // 景点详情「查看游记」：先在社区 VM 写入城市关键词，再切换到分享 Tab 自动筛选
     val viewArticlesByCity: (String) -> Unit = { keyword ->
+        shareViewModel.selectSource("feed")
         shareViewModel.setCommunityKeyword(keyword)
         navController.navigate(AppDestination.ROUTE_SHARE) {
             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -308,6 +348,10 @@ fun SkeletonApp(
             composable(AppDestination.ROUTE_MAP) {
                 MapScreen(
                     appViewModel = globalAppVm,
+                    onSearch = {
+                        recommendViewModel.prepareSearch(currentTrip.city)
+                        navController.navigate(AppDestination.spotSearchRoute(""))
+                    },
                     modifier = Modifier.padding(innerPadding),
                     onStartNavigation = { mode, oLat, oLng, dLat, dLng, destName, naviMode, city ->
                         // 统一先进入多路线选择页（导航前置页），由卡片再进入导航；
@@ -352,8 +396,16 @@ fun SkeletonApp(
                         switchToMapTab()
                     },
                     // 某天卡片「加入景点」：目标天已暂存进全局 VM，跳到「推荐」Tab 选景点
-                    onGoRecommend = switchToRecommendTab,
+                    onGoRecommend = {
+                        recommendViewModel.selectCity(currentTrip.city)
+                        switchToRecommendTab()
+                    },
                     requestPlanning = requestPlanning,
+                    overviewRequest = planOverviewRequest,
+                    onOpenWeather = {
+                        openWeatherForCity(currentTrip.city)
+                    },
+                    requestedCity = requestedPlanCity,
                     onPlanningRequestHandled = { requestPlanning = false },
                     modifier = Modifier.padding(innerPadding),
                 )
@@ -375,17 +427,25 @@ fun SkeletonApp(
             composable(AppDestination.ROUTE_RECOMMEND) {
                 RecommendScreen(
                     onPlan = { city ->
-                        if (city != "全部城市") globalAppVm.selectCity(city)
+                        requestedPlanCity = city.takeUnless { it == "全部城市" }
                         requestPlanning = true
                         switchToPlanTab()
                     },
                     onOpenOutfit = { navController.navigate(AppDestination.ROUTE_OUTFIT_TOOLS) },
                     petFriendly = globalAppVm.aiPetFriendlyPreferred.collectAsStateWithLifecycle().value,
+                    currentTrip = currentTrip,
+                    onViewPlan = switchToPlanTab,
+                    weatherLabel = homeWeather.overview?.let { "${it.nowWeather} ${it.nowTemp}°" } ?: "天气",
+                    weatherCity = homeWeather.city.name,
+                    onOpenWeather = {
+                        openWeatherForCity(discoveryState.currentCity)
+                    },
                     onPetFriendlyChange = globalAppVm::setAiPetFriendlyPreferred,
                     onSpotClick = { spotId ->
                         navController.navigate(AppDestination.spotDetailRoute(spotId))
                     },
                     onSearch = { keyword ->
+                        recommendViewModel.prepareSearch(discoveryState.currentCity)
                         navController.navigate(AppDestination.spotSearchRoute(keyword))
                     },
                     recommendViewModel = recommendViewModel,
@@ -396,6 +456,10 @@ fun SkeletonApp(
             composable(AppDestination.ROUTE_PROFILE) {
                 // 深色开关的持久化状态（全局 VM + DataStore）
                 val persistedDarkMode by globalAppVm.isDarkMode.collectAsStateWithLifecycle()
+                val postCollectCount by shareViewModel.collectionCount.collectAsStateWithLifecycle()
+                val publishedCount by shareViewModel.publishedCount.collectAsStateWithLifecycle()
+                LaunchedEffect(Unit) { shareViewModel.refreshPublishedCount() }
+                LaunchedEffect(activeAccount?.token) { shareViewModel.refreshCollectionCount() }
                 ProfileScreen(
                     appViewModel = appViewModel,
                     globalAppViewModel = globalAppVm,
@@ -404,6 +468,12 @@ fun SkeletonApp(
                     onPersistCity = globalAppVm::selectCity,
                     // 多账号体系下当前活跃账号（DataStore）：头部昵称 / 身份以 JWT 账号为准
                     activeAccount = activeAccount,
+                    cloudPostCollectCount = postCollectCount,
+                    cloudPublishedCount = publishedCount,
+                    onOpenPets = { navController.navigate(AppDestination.ROUTE_PET_PROFILES) },
+                    onOpenDiaries = { navController.navigate(AppDestination.ROUTE_TRAVEL_DIARIES) },
+                    onOpenPlan = switchToPlanTab,
+                    onOpenMyPosts = { navController.navigate(AppDestination.ROUTE_MY_POSTS) },
                     onOpenFavoriteGuides = {
                         navController.navigate(AppDestination.ROUTE_FAVORITE_GUIDES)
                     },
@@ -523,9 +593,8 @@ fun SkeletonApp(
                     },
                     recommendViewModel = recommendViewModel,
                     appViewModel = globalAppVm,
-                    // 跳转「计划」Tab 的逻辑已在详情页预留（onGoToPlan）；
-                    // 待计划页迁移到全局 AppViewModel 行程后，改为 onGoToPlan = switchToPlanTab 即可开启
-                    onGoToPlan = null,
+                    // 加入后回到行程概览，避免恢复到先前停留的天气子页。
+                    onGoToPlan = switchToPlanTab,
                 )
             }
 
@@ -833,6 +902,24 @@ fun SkeletonApp(
             // 设置（参考小红书风格）：
             // - 切换账号：进入独立的多账号切换页（不是弹窗）；
             // - 退出登录：后端成功后已清 token 与账号记录，清空整个返回栈跳登录页。
+            composable(AppDestination.ROUTE_PET_PROFILES) {
+                PetProfilesScreen(globalAppVm) { navController.popBackStack() }
+            }
+            composable(AppDestination.ROUTE_TRAVEL_DIARIES) {
+                TravelDiariesScreen(globalAppVm) { navController.popBackStack() }
+            }
+            composable(AppDestination.ROUTE_WEATHER_OVERVIEW) {
+                WeatherOverviewScreen(weatherViewModel, { navController.popBackStack() }, { day ->
+                    navController.navigate(AppDestination.weatherDayRoute(day))
+                })
+            }
+            composable(AppDestination.ROUTE_MY_POSTS) {
+                com.example.citygo.skeleton.share.CommunityLibraryScreen(
+                    shareViewModel = shareViewModel, appViewModel = globalAppVm,
+                    onBack = { navController.popBackStack() },
+                    onOpen = { navController.navigate(AppDestination.articleDetailRoute(it)) },
+                    onPublish = { navController.navigate(AppDestination.ROUTE_PUBLISH_ARTICLE) }, source = "mine")
+            }
             composable(AppDestination.ROUTE_SETTINGS) {
                 val darkMode by globalAppVm.isDarkMode.collectAsStateWithLifecycle()
                 SettingsScreen(
@@ -905,7 +992,8 @@ private fun AppBottomBar(
     navController: androidx.navigation.NavHostController,
     currentDestinationRoute: String?,
 ) {
-    NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+    androidx.compose.foundation.layout.Column(Modifier.background(MaterialTheme.colorScheme.surface).navigationBarsPadding()) {
+    NavigationBar(modifier = Modifier.height(64.dp), windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0), containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
         AppDestination.bottomTabs.forEach { destination ->
             // hierarchy 匹配可兼容后续 Tab 内再嵌套导航图的情况
             val selected = currentDestinationRoute == destination.route
@@ -921,7 +1009,7 @@ private fun AppBottomBar(
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = MaterialTheme.colorScheme.primary,
                     selectedTextColor = MaterialTheme.colorScheme.primary,
-                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                    indicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                     unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 ),
@@ -941,4 +1029,6 @@ private fun AppBottomBar(
             )
         }
     }
+    }
 }
+

@@ -18,6 +18,10 @@ class ShareViewModel : ViewModel() {
     private val repository = RepositoryContainer.articleRepository
     private val _uiState = MutableStateFlow(CommunityUiState())
     val uiState = _uiState.asStateFlow()
+    private val _collectionCount = MutableStateFlow<Long?>(null)
+    val collectionCount = _collectionCount.asStateFlow()
+    private val _publishedCount = MutableStateFlow<Long?>(null)
+    val publishedCount = _publishedCount.asStateFlow()
     private val _articles = MutableStateFlow<Map<String, TravelArticle>>(emptyMap())
     val articleMap = _articles.asStateFlow()
     private val _threads = MutableStateFlow<Map<String, CommentThread>>(emptyMap())
@@ -39,11 +43,13 @@ class ShareViewModel : ViewModel() {
                     accountScope = this
                     busy.clear()
                     _articles.value = emptyMap()
+                    _collectionCount.value = null
+                    _publishedCount.value = null
                     _threads.value = emptyMap()
                     _communityKeyword.value = null
                     _uiState.value = CommunityUiState(initialLoading = !token.isNullOrBlank())
                     page = 0
-                    if (!token.isNullOrBlank()) refresh()
+                    if (!token.isNullOrBlank()) { refresh(); refreshCollectionCount() }
                     awaitCancellation()
                 }
             }
@@ -51,7 +57,21 @@ class ShareViewModel : ViewModel() {
     }
     fun setCommunityKeyword(keyword: String?) { _communityKeyword.value = keyword?.trim()?.ifBlank { null } }
     fun clearCommunityKeyword() { _communityKeyword.value = null }
+    fun refreshCollectionCount() {
+        accountScope?.launch {
+            try { _collectionCount.value = repository.page("collections", 1, 1).total }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* 保留上次成功计数，主列表独立处理错误。 */ }
+        }
+    }
     fun consumeErrorMessage() { _uiState.update { it.copy(errorMessage = null) } }
+    fun refreshPublishedCount() {
+        accountScope?.launch {
+            try { _publishedCount.value = repository.page("mine", 1, 1).total }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* Keep the last confirmed total; never count only the loaded page. */ }
+        }
+    }
     fun selectSource(source: String) {
         if (source == _uiState.value.source) return
         _uiState.update { it.copy(source = source, articles = emptyList()) }
@@ -104,6 +124,7 @@ class ShareViewModel : ViewModel() {
     fun toggleCollect(id: String) = action("collect:$id") {
         val updated = repository.toggleCollect(id)
         replaceArticle(updated)
+        refreshCollectionCount()
         if (_uiState.value.source == "collections" && !updated.isCollected) refresh()
     }
     fun loadComments(id: String, root: Long? = null, reset: Boolean = false) {

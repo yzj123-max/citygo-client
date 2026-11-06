@@ -83,30 +83,24 @@ class AuthApi(
         return execute(request, typeLoginData)
     }
 
-    /** 3. 发送模拟验证码：POST /sendCode?phone=（phone 走 Query，无 Body） */
+    /** 发送调试验证码：POST /sendCode，JSON {phone}。 */
     suspend fun sendCode(phone: String): ApiResponse<Any> {
-        val request = buildQueryPostRequest(
+        val request = buildJsonPostRequest(
             path = AuthApiConfig.PATH_SEND_CODE,
-            params = listOf(AuthApiConfig.FIELD_PHONE to phone),
+            payload = mapOf(AuthApiConfig.FIELD_PHONE to phone),
         )
         return execute(request, typeAny)
     }
 
     /**
-     * 4. 验证码登录：POST /verifyCodeLogin
-     *
-     * **必须是表单提交**：Content-Type: application/x-www-form-urlencoded，
-     * 请求体形如 phone=13800000000&code=1234（等价 Retrofit 写法
-     * `@FormUrlEncoded @POST("verifyCodeLogin") fun codeLogin(@Field("phone") ..., @Field("code") ...)`）。
-     * 因为后端该接口参数是 Spring @RequestParam，只从 Query / 表单解析；
-     * 若发 JSON Body（application/json），后端绑定不到 phone，会直接请求失败。
+     * 验证码登录：POST /userLogin/code，JSON {phone, verifyCode}，对齐后端 UserLoginDTO。
      *
      * 成功 data 为 token 字符串或 {token,isNewUser} 对象（不修改验证码发送 / 校验逻辑）。
      */
     suspend fun codeLogin(phone: String, code: String): ApiResponse<com.google.gson.JsonElement> {
-        val request = buildFormPostRequest(
+        val request = buildJsonPostRequest(
             path = AuthApiConfig.PATH_CODE_LOGIN,
-            fields = listOf(
+            payload = mapOf(
                 AuthApiConfig.FIELD_PHONE to phone,
                 AuthApiConfig.FIELD_CODE to code,
             ),

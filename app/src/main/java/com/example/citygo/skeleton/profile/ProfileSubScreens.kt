@@ -132,7 +132,7 @@ fun FavoriteGuidesScreen(
     ProfileSubScaffold(title = "我的收藏攻略", onBack = onBack) { innerPadding ->
         if (spots.isEmpty()) {
             Box(Modifier.padding(innerPadding)) {
-                EmptyTips(text = "还没有收藏景点\n去「推荐」页发现好去处吧", emoji = "📍")
+                EmptyTips(text = "还没有收藏景点\n去「发现」页寻找好去处吧", emoji = "📍")
             }
         } else {
             LazyColumn(
@@ -454,21 +454,21 @@ fun PrivacyScreen(onBack: () -> Unit) {
             SettingGroupCard {
                 SwitchRow(
                     title = "个性化推荐",
-                    description = "根据浏览记录推荐攻略与帖子（Mock）",
+                    description = "开发中 · 尚未启用个性化推荐设置",
                     checked = personalRecommend,
                     onCheckedChange = { personalRecommend = it },
                 )
                 CardDivider()
                 SwitchRow(
                     title = "允许陌生人查看我的笔记",
-                    description = "关闭后仅互相关注好友可见（Mock）",
+                    description = "开发中 · 当前请在发布游记时设置可见范围",
                     checked = strangerView,
                     onCheckedChange = { strangerView = it },
                 )
                 CardDivider()
                 SwitchRow(
                     title = "允许获取位置信息",
-                    description = "用于推荐附近景点与城市服务（Mock）",
+                    description = "开发中 · 当前定位权限请在系统设置中管理",
                     checked = showLocation,
                     onCheckedChange = { showLocation = it },
                 )
@@ -476,11 +476,11 @@ fun PrivacyScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(12.dp))
             SettingGroupCard {
                 ArrowRow(title = "账号与安全") {
-                    Toast.makeText(context, "账号与安全开发中（Mock）", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "账号与安全功能正在完善", Toast.LENGTH_SHORT).show()
                 }
                 CardDivider()
                 ArrowRow(title = "黑名单管理") {
-                    Toast.makeText(context, "黑名单管理开发中（Mock）", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "黑名单管理功能正在完善", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -509,7 +509,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 modifier = Modifier
                     .size(84.dp)
                     .background(
-                        brush = Brush.linearGradient(listOf(0xFF6C5CE7, 0xFFB8B0FF).map { Color(it.toInt()) }),
+                        brush = Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)),
                         shape = RoundedCornerShape(22.dp),
                     ),
                 contentAlignment = Alignment.Center,
@@ -518,27 +518,27 @@ fun AboutScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(14.dp))
             Text(
-                text = "智旅方途",
+                text = "CityGo · 智旅方途",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "版本 v1.0.0（Mock 演示版）",
+                text = "版本 ${com.example.citygo.BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(20.dp))
             SettingGroupCard(modifier = Modifier.fillMaxWidth()) {
                 ArrowRow(title = "用户协议") {
-                    Toast.makeText(context, "用户协议（Mock）", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "用户协议正在完善", Toast.LENGTH_SHORT).show()
                 }
                 CardDivider()
                 ArrowRow(title = "隐私政策") {
-                    Toast.makeText(context, "隐私政策（Mock）", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "隐私政策正在完善", Toast.LENGTH_SHORT).show()
                 }
                 CardDivider()
                 ArrowRow(title = "检查更新") {
-                    Toast.makeText(context, "当前已是最新版本（Mock）", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "暂未接入在线更新服务", Toast.LENGTH_SHORT).show()
                 }
             }
             Spacer(Modifier.weight(1f))
@@ -593,7 +593,7 @@ private fun SwitchRow(
             )
         }
         Spacer(Modifier.width(8.dp))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = false)
     }
 }
 

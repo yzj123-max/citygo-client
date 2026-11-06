@@ -3,6 +3,7 @@ package com.demo.logindemo.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -80,6 +81,8 @@ public class OotdAiService {
                 String json = objectMapper.writeValueAsString(reqBody);
                 URL url = new URL(API_URL);
                 conn = (HttpURLConnection) url.openConnection();
+                conn.setConnectTimeout(10_000);
+                conn.setReadTimeout(110_000);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Authorization", "Bearer " + apiKey);
                 conn.setRequestProperty("Content-Type", "application/json");
@@ -99,7 +102,8 @@ public class OotdAiService {
                         // chat/completions 的返回路径： choices[0].delta.content
                         JsonNode deltaContent = node.at("/choices/0/delta/content");
                         if (!deltaContent.isMissingNode() && deltaContent.asText().length() > 0) {
-                            emitter.send(SseEmitter.event().data(deltaContent.asText()));
+                            emitter.send(SseEmitter.event()
+                                    .data(Map.of("content", deltaContent.asText()), MediaType.APPLICATION_JSON));
                         }
                     }
                 }

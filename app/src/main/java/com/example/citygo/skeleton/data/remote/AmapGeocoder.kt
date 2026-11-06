@@ -1,6 +1,14 @@
 package com.example.citygo.skeleton.data.remote
 
 import android.content.Context
+import com.example.citygo.BuildConfig
+import com.example.citygo.skeleton.data.remote.poi.AmapPoiApi
+import com.example.citygo.skeleton.data.remote.poi.PoiJson
+import kotlinx.coroutines.CancellationException
+import okhttp3.OkHttpClient
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
 import com.amap.api.services.core.LatLonPoint
 import com.amap.api.services.geocoder.GeocodeQuery
 import com.amap.api.services.geocoder.GeocodeResult
@@ -46,6 +54,36 @@ sealed interface StrictGeocodeResult {
 
 class AmapGeocoder(private val context: Context) {
 
+    // 景点名称属于 POI；地址地理编码常常查不到博物馆、餐厅等名称。
+    private val poiApi by lazy {
+        Retrofit.Builder().baseUrl(AmapPoiApi.BASE_URL)
+            .client(OkHttpClient.Builder().connectTimeout(6, TimeUnit.SECONDS)
+                .readTimeout(6, TimeUnit.SECONDS).build())
+            .addConverterFactory(GsonConverterFactory.create(PoiJson.gson))
+            .build().create(AmapPoiApi::class.java)
+    }
+
+    private suspend fun queryPoi(name: String, city: String): GeocodeResultPoint? {
+        if (BuildConfig.AMAP_WEB_KEY.isBlank()) return null
+        return try {
+            val response = poiApi.textSearch(key = BuildConfig.AMAP_WEB_KEY, keywords = name,
+                city = city, citylimit = true, offset = 10, extensions = "base")
+            if (response.status != "1") return null
+            val pois = response.pois.orEmpty()
+            val poi = pois.firstOrNull { it.name == name }
+                ?: pois.firstOrNull { candidate ->
+                    val title = candidate.name.orEmpty()
+                    name.length >= 3 && (title.contains(name) || name.contains(title) && title.length >= 3)
+                } ?: return null
+            val coords = poi.location?.split(',') ?: return null
+            val lng = coords.getOrNull(0)?.toDoubleOrNull() ?: return null
+            val lat = coords.getOrNull(1)?.toDoubleOrNull() ?: return null
+            if (lat !in -90.0..90.0 || lng !in -180.0..180.0 || lat == 0.0 && lng == 0.0) null
+            else GeocodeResultPoint(lat, lng, false)
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { null }
+    }
+
     /** 热门城市中心锚点，模拟兜底时使用 */
     private val cityAnchors: Map<String, Pair<Double, Double>> = mapOf(
         "成都" to (30.6600 to 104.0700),
@@ -87,6 +125,9 @@ class AmapGeocoder(private val context: Context) {
      *             防止跨省同名地点匹配错误
      */
     suspend fun geocodeStrict(name: String, city: String): StrictGeocodeResult {
+        withTimeoutOrNull(GEOCODE_TIMEOUT_MS) { queryPoi(name, city) }?.let {
+            return StrictGeocodeResult.Success(it)
+        }
         val result = withTimeoutOrNull(GEOCODE_TIMEOUT_MS) { queryStrictFromAmap(name, city) }
         // withTimeoutOrNull 返回 null 只有两种情况：超时 / 内部返回 null（不会发生）
         return result ?: StrictGeocodeResult.Timeout

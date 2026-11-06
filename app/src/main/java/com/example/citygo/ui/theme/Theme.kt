@@ -38,9 +38,9 @@ private val LightColorScheme = lightColorScheme(
     surfaceBright = LightSurface,
     surfaceContainerLowest = LightSurface,
     surfaceContainerLow = Color(0xFFF6F7F1),
-    surfaceContainer = Color(0xFFF1F4EC),
-    surfaceContainerHigh = Color(0xFFEDF1E6),
-    surfaceContainerHighest = Color(0xFFE7EDDF),
+    surfaceContainer = LightSurface,
+    surfaceContainerHigh = LightSurface,
+    surfaceContainerHighest = LightSurface,
 )
 
 /** 深色主题：同一套品牌色映射到暗色容器，保证切换后视觉统一 */

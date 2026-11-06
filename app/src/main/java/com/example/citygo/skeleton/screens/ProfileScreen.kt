@@ -116,6 +116,12 @@ fun ProfileScreen(
     onLogout: (() -> Unit)? = null,
     // 多账号体系下当前活跃账号（DataStore 持久化）：切换账号后头部昵称随之刷新；null 时沿用 Mock 数据
     activeAccount: com.example.citygo.skeleton.data.datastore.AccountEntity? = null,
+    cloudPostCollectCount: Long? = null,
+    cloudPublishedCount: Long? = null,
+    onOpenPets: (() -> Unit)? = null,
+    onOpenDiaries: (() -> Unit)? = null,
+    onOpenPlan: (() -> Unit)? = null,
+    onOpenMyPosts: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val state by appViewModel.uiState.collectAsStateWithLifecycle()
@@ -161,178 +167,57 @@ fun ProfileScreen(
             currentCityName = state.currentCity.name,
             visitedCityCount = state.recentCities.size,
             guideCount = collectSpotList.size,
-            postCount = collectPostList.size,
-            historyCount = browseHistoryList.size,
+            diaryCount = diaryList.size,
+            publishedCount = cloudPublishedCount,
             // 城市选择入口已迁移至「计划」页首页（规划第一步），「我的」页不再提供该入口
             citySelector = {},
             // 点击昵称进入用户资料主页（游客 / 未注入时不可点）
             onOpenUserProfile = onOpenUserProfile,
+            onOpenSettings = onOpenSettings,
+            onOpenGuides = onOpenFavoriteGuides,
+            onOpenDiaries = onOpenDiaries,
+            onOpenPosts = onOpenMyPosts,
         )
 
         Spacer(Modifier.height(14.dp))
 
-        // ==================== 列表模块：收藏 / 历史 ====================
+        Surface(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).clickable { onOpenPets?.invoke() },
+            shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+            Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Pets, null, Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("我的旅行搭子", style = MaterialTheme.typography.titleSmall)
+                    Text(petList.firstOrNull()?.let { "${it.name} · ${it.type}" } ?: "添加宠物档案，一起去旅行",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text("管理档案 ›", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            }
+        }
+        Spacer(Modifier.height(20.dp))
         SectionContainer(title = "我的旅行") {
-            // 游客模式隐藏两个收藏入口，仅保留浏览记录
-            if (!state.isGuest) {
-                MenuItem(
-                    icon = Icons.Filled.MenuBook,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    title = "我的收藏攻略",
-                    trailingText = "${collectSpotList.size} 篇",
-                    onClick = onOpenFavoriteGuides,
-                )
-                ItemDivider()
-                MenuItem(
-                    icon = Icons.Filled.Favorite,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    title = "我的收藏帖子",
-                    trailingText = "${collectPostList.size} 条",
-                    onClick = onOpenFavoritePosts,
-                )
-                ItemDivider()
-            }
-            MenuItem(
-                icon = Icons.Filled.History,
-                iconTint = MaterialTheme.colorScheme.primary,
-                title = "浏览记录",
-                trailingText = "${browseHistoryList.size} 条",
-                onClick = onOpenBrowseHistory,
-            )
-            if (state.isGuest) {
-                Text(
-                    text = "游客模式下收藏入口已隐藏，切换账号登录后可见",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 12.dp),
-                )
-            }
+            MenuItem(icon = Icons.Filled.MenuBook, iconTint = MaterialTheme.colorScheme.primary,
+                title = "我的行程", trailingText = null, onClick = { onOpenPlan?.invoke() })
+            ItemDivider()
+            MenuItem(icon = Icons.Filled.Favorite, iconTint = MaterialTheme.colorScheme.primary,
+                title = "收藏攻略", trailingText = "${collectSpotList.size}", onClick = onOpenFavoriteGuides)
+            ItemDivider()
+            MenuItem(icon = Icons.Filled.History, iconTint = MaterialTheme.colorScheme.primary,
+                title = "浏览记录", trailingText = "${browseHistoryList.size}", onClick = onOpenBrowseHistory)
+            ItemDivider()
+            MenuItem(icon = Icons.Filled.Edit, iconTint = MaterialTheme.colorScheme.primary,
+                title = "旅行日记", trailingText = "${diaryList.size}", onClick = { onOpenDiaries?.invoke() }, isLast = true)
         }
-
-        Spacer(Modifier.height(14.dp))
-
-        // ==================== 宠物档案模块 ====================
-        SectionContainer(
-            title = "宠物档案",
-            headerAction = {
-                // 新增宠物（打开新增弹窗前先清掉可能残留的编辑目标，保证同一时刻只有一个弹窗）
-                TextButton(onClick = {
-                    petDialogTarget = null
-                    showPetAddDialog = true
-                }) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("添加宠物")
-                }
-            },
-        ) {
-            if (petList.isEmpty()) {
-                // 空状态：整行可点，直接拉起新增弹窗
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showPetAddDialog = true }
-                        .padding(horizontal = 14.dp, vertical = 18.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Filled.Pets, null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "添加你的宠物",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text = "建立名字、品种、体重档案，出行携宠更省心",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            } else {
-                (if (showAllPets) petList else petList.take(1)).forEachIndexed { index, pet ->
-                    PetItem(
-                        pet = pet,
-                        onEdit = {
-                            showPetAddDialog = false
-                            petDialogTarget = pet
-                        },
-                        onDelete = { pendingDeletePet = pet },
-                    )
-                    if (showAllPets && index != petList.lastIndex) ItemDivider(startIndent = 62.dp)
-                }
-                if (petList.size > 1) TextButton(onClick = { showAllPets = !showAllPets }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (showAllPets) "收起档案" else "查看全部 ${petList.size} 个宠物档案")
-                }
-            }
+        Spacer(Modifier.height(20.dp))
+        SectionContainer(title = "我的内容") {
+            MenuItem(icon = Icons.Filled.Edit, iconTint = MaterialTheme.colorScheme.primary,
+                title = "我的发布", trailingText = null, onClick = { onOpenMyPosts?.invoke() })
+            ItemDivider()
+            MenuItem(icon = Icons.Filled.Favorite, iconTint = MaterialTheme.colorScheme.primary,
+                title = "收藏帖子", trailingText = "${cloudPostCollectCount ?: collectPostList.size}",
+                onClick = onOpenFavoritePosts, isLast = true)
         }
-
-        Spacer(Modifier.height(14.dp))
-
-        // ==================== 旅行日记模块 ====================
-        SectionContainer(
-            title = "旅行日记",
-            headerAction = {
-                // 写日记（新增；打开前先清掉可能残留的编辑目标，保证同一时刻只有一个弹窗）
-                TextButton(onClick = {
-                    diaryDialogTarget = null
-                    showDiaryAddDialog = true
-                }) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("写日记")
-                }
-            },
-        ) {
-            if (diaryList.isEmpty()) {
-                // 空状态：整行可点，直接拉起编辑弹窗
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showDiaryAddDialog = true }
-                        .padding(horizontal = 14.dp, vertical = 18.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Filled.MenuBook, null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "写下第一篇旅行日记",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text = "记录路上的风景与心情",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            } else {
-                Column(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    (if (showAllDiaries) diaryList else diaryList.take(1)).forEach { diary ->
-                        DiaryItem(
-                            diary = diary,
-                            onEdit = {
-                                showDiaryAddDialog = false
-                                diaryDialogTarget = diary
-                            },
-                            onDelete = { pendingDeleteDiary = diary },
-                        )
-                    }
-                    if (diaryList.size > 1) TextButton(onClick = { showAllDiaries = !showAllDiaries }, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (showAllDiaries) "收起日记" else "查看全部 ${diaryList.size} 篇日记")
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(14.dp))
-
+        Spacer(Modifier.height(20.dp))
         // ==================== 设置列表 ====================
         SectionContainer(title = "设置与帮助") {
             MenuItem(icon = Icons.Filled.Settings, iconTint = MaterialTheme.colorScheme.primary,
@@ -485,16 +370,20 @@ private fun ProfileHeader(
     /** 最近访问过的城市数（来自 ViewModel，不再写死） */
     visitedCityCount: Int,
     guideCount: Int,
-    postCount: Int,
-    historyCount: Int,
+    diaryCount: Int,
+    publishedCount: Long?,
     citySelector: @Composable () -> Unit,
     /** 点击昵称进入用户资料主页（仅已登录且导航层注入时可点，null 保持原样） */
     onOpenUserProfile: (() -> Unit)? = null,
+    onOpenSettings: (() -> Unit)? = null,
+    onOpenGuides: () -> Unit,
+    onOpenDiaries: (() -> Unit)?,
+    onOpenPosts: (() -> Unit)?,
 ) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 22.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(76.dp)) {
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(64.dp)) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(Icons.Filled.Person, null, Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
                     if (!isGuest && !avatarUrl.isNullOrBlank()) AsyncImage(model = avatarUrl, contentDescription = "个人头像",
@@ -508,23 +397,24 @@ private fun ProfileHeader(
                 Text(if (isGuest) "登录后，收藏你的旅行灵感" else "把日常过成旅行", style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if (!isGuest && onOpenUserProfile != null) IconButton(onClick = onOpenUserProfile) {
-                Icon(Icons.Filled.Edit, "个人资料", tint = MaterialTheme.colorScheme.primary)
+            if (onOpenSettings != null) IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Filled.Settings, "设置与帮助", tint = MaterialTheme.colorScheme.onSurface)
             }
         }
-        Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface) {
-            Row(Modifier.fillMaxWidth().padding(vertical = 18.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                HeaderStat("$guideCount", "收藏攻略")
-                HeaderStat("$postCount", "收藏帖子")
-                HeaderStat("$historyCount", "浏览记录")
+        Surface(color = Color.Transparent) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                HeaderStat("$guideCount", "收藏攻略", onOpenGuides)
+                HeaderStat("$diaryCount", "旅行日记", onOpenDiaries)
+                HeaderStat(publishedCount?.toString() ?: "—", "我的发布", onOpenPosts)
             }
         }
     }
 }
 
 @Composable
-private fun HeaderStat(value: String, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun HeaderStat(value: String, label: String, onClick: (() -> Unit)?) {
+    Column(modifier = Modifier.clickable(enabled = onClick != null) { onClick?.invoke() }.padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(4.dp))
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -556,8 +446,8 @@ private fun SectionContainer(
         Surface(
             shape = RoundedCornerShape(18.dp),
             color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 1.dp,
-            shadowElevation = 2.dp,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column { content() }
@@ -662,14 +552,14 @@ private fun MenuItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 15.dp),
+            .padding(horizontal = 14.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         MenuIcon(icon = icon, tint = iconTint)
         Spacer(Modifier.width(12.dp))
         Text(
             text = title,
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
         )
@@ -721,8 +611,8 @@ private fun SwitchItem(
 private fun MenuIcon(icon: ImageVector, tint: Color) {
     Box(
         modifier = Modifier
-            .size(36.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .size(30.dp)
+            .clip(RoundedCornerShape(8.dp))
             .background(tint.copy(alpha = 0.14f)),
         contentAlignment = Alignment.Center,
     ) {

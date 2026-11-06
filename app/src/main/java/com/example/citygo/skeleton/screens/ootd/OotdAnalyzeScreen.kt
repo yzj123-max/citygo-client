@@ -15,6 +15,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -79,7 +81,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.citygo.skeleton.data.remote.ootd.OotdSseClient
 import com.example.citygo.skeleton.data.remote.ootd.OotdSseEvent
-import com.example.citygo.skeleton.data.remote.ootd.OotdUploadException
+import com.example.citygo.skeleton.data.remote.ootd.OotdServiceException
 import com.example.citygo.skeleton.util.OotdImageUtils
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -100,10 +102,10 @@ import java.net.UnknownHostException
 /* ============================== 页面状态模型 ============================== */
 
 /** 评估流程阶段 */
-enum class OotdPhase { IDLE, UPLOADING, STREAMING, DONE, FAILED }
+enum class OotdPhase { IDLE, PREPARING, STREAMING, DONE, FAILED }
 
-/** 失败归类：上传失败 / 网络异常（含超时与连不上），驱动不同的红色状态卡 */
-enum class OotdErrorKind { UPLOAD, NETWORK, TIMEOUT, SERVER }
+/** 失败归类：图片处理失败 / 网络异常（含超时与连不上），驱动不同的红色状态卡 */
+enum class OotdErrorKind { IMAGE, NETWORK, TIMEOUT, SERVER }
 
 data class OotdUiState(
     val imageUri: Uri? = null,
@@ -116,7 +118,7 @@ data class OotdUiState(
     val errorKind: OotdErrorKind? = null,
     val errorMessage: String? = null,
 ) {
-    val busy: Boolean get() = phase == OotdPhase.UPLOADING || phase == OotdPhase.STREAMING
+    val busy: Boolean get() = phase == OotdPhase.PREPARING || phase == OotdPhase.STREAMING
 }
 
 private const val DEFAULT_QUESTION = "帮我分析这套穿搭"
@@ -127,7 +129,7 @@ private const val TYPE_CHARS_PER_TICK = 2
 
 /**
  * OOTD 副页面 ViewModel：
- * 选图压缩（[OotdImageUtils]）→ 上传 + SSE（[OotdSseClient]）→ 打字机逐字渲染。
+ * 选图压缩（[OotdImageUtils]）→ SSE 分析（[OotdSseClient]）→ 打字机逐字渲染。
  * 页面退出时 [close] / onCleared 主动取消请求并关闭 SSE，防止内存泄漏。
  */
 class OotdAnalyzeViewModel(app: Application) : AndroidViewModel(app) {
@@ -172,7 +174,7 @@ class OotdAnalyzeViewModel(app: Application) : AndroidViewModel(app) {
         analyzeJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(
-                    phase = OotdPhase.UPLOADING,
+                    phase = OotdPhase.PREPARING,
                     displayText = "",
                     referenceTitles = emptyList(),
                     errorKind = null,
@@ -192,7 +194,7 @@ class OotdAnalyzeViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Throwable) {
                 // 压缩失败：关闭通道后展示错误，避免通道对象滞留
                 deltaChannel.close()
-                enterFailure(OotdErrorKind.UPLOAD, "图片处理失败：${e.message ?: "请更换图片重试"}")
+                enterFailure(OotdErrorKind.IMAGE, "图片处理失败：${e.message ?: "请更换图片重试"}")
                 return@launch
             }
 
@@ -210,20 +212,16 @@ class OotdAnalyzeViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
 
-            // ③ 上传 → SSE 收集（IO 线程），事件切到状态 / 打字机
+            // 提交照片并收集流式结果。
+            _uiState.update { it.copy(phase = OotdPhase.STREAMING) }
             try {
                 withContext(Dispatchers.IO) {
                     client.analyze(
                         imageBytes = bytes,
-                        fileName = "ootd_${System.currentTimeMillis()}.jpg",
                         question = question,
                     ).collect { event ->
                         when (event) {
-                            is OotdSseEvent.Uploaded ->
-                                _uiState.update { it.copy(phase = OotdPhase.STREAMING) }
-
                             is OotdSseEvent.TextDelta -> {
-                                _uiState.update { it.copy(phase = OotdPhase.STREAMING) }
                                 deltaChannel.send(event.text)
                             }
 
@@ -259,7 +257,6 @@ class OotdAnalyzeViewModel(app: Application) : AndroidViewModel(app) {
     /** 清空结果（保留图片与问题，可再次分析） */
     fun resetResult() {
         analyzeJob?.cancel()
-        client.close()
         _uiState.update {
             it.copy(
                 phase = OotdPhase.IDLE,
@@ -274,7 +271,7 @@ class OotdAnalyzeViewModel(app: Application) : AndroidViewModel(app) {
     /** 页面退出：取消协程 + 主动关闭 SSE，防止连接与线程泄漏 */
     fun close() {
         analyzeJob?.cancel()
-        client.close()
+        _uiState.update { if (it.busy) it.copy(phase = OotdPhase.IDLE) else it }
     }
 
     private fun enterFailure(kind: OotdErrorKind, message: String) {
@@ -284,10 +281,9 @@ class OotdAnalyzeViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 异常 → （错误分类，友好文案） */
     private fun mapError(e: Throwable): Pair<OotdErrorKind, String> {
-        val lanUrl = client.baseUrl()
         return when (e) {
-            is OotdUploadException ->
-                OotdErrorKind.UPLOAD to (e.message ?: "图片上传失败，请重试")
+            is OotdServiceException ->
+                OotdErrorKind.SERVER to (e.message ?: "穿搭服务异常，请稍后重试")
             is SocketTimeoutException ->
                 OotdErrorKind.TIMEOUT to
                     "服务响应超时（120 秒无数据返回），请稍后重试"
@@ -302,7 +298,6 @@ class OotdAnalyzeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
-        client.close()
         super.onCleared()
     }
 
@@ -401,12 +396,12 @@ fun OotdAnalyzeScreen(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("OOTD 穿搭 AI 分析") },
+                title = { Text("单张穿搭分析") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回分享页",
+                            contentDescription = "返回",
                         )
                     }
                 },
@@ -424,14 +419,26 @@ fun OotdAnalyzeScreen(
             // ① 原图预览 / 选图
             Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("① 选择穿搭照片", fontWeight = FontWeight.SemiBold)
                     val imageUri = state.imageUri
                     if (imageUri == null) {
+                        Column(Modifier.fillMaxWidth().height(220.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable { launchGallery() },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center) {
+                            Icon(Icons.Filled.PhotoCamera, null, Modifier.size(50.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.height(16.dp))
+                            Text("上传一张穿搭照片", style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.height(6.dp))
+                            Text("选择清晰照片，让搭配细节更容易被看见", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            Button(onClick = { launchCamera() }, modifier = Modifier.weight(1f)) {
+                            OutlinedButton(onClick = { launchCamera() }, modifier = Modifier.weight(1f)) {
                                 Icon(Icons.Filled.PhotoCamera, contentDescription = null)
                                 Spacer(Modifier.width(6.dp))
                                 Text("拍照")
@@ -443,7 +450,7 @@ fun OotdAnalyzeScreen(
                             }
                         }
                         Text(
-                            "图片将在本机压缩后上传（最长边 1280px / JPEG）",
+                            "点击开始分析后，将上传所选照片进行评估",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.outline,
                         )
@@ -480,7 +487,8 @@ fun OotdAnalyzeScreen(
                 label = { Text("想让 AI 分析什么？") },
                 placeholder = { Text(DEFAULT_QUESTION) },
                 modifier = Modifier.fillMaxWidth(),
-                minLines = 2,
+                shape = RoundedCornerShape(16.dp),
+                minLines = 3,
             )
 
             // ③ 主操作按钮
@@ -497,7 +505,7 @@ fun OotdAnalyzeScreen(
                     .height(50.dp),
             ) {
                 when (state.phase) {
-                    OotdPhase.UPLOADING, OotdPhase.STREAMING ->
+                    OotdPhase.PREPARING, OotdPhase.STREAMING ->
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
                             strokeWidth = 2.dp,
@@ -510,7 +518,7 @@ fun OotdAnalyzeScreen(
                 Spacer(Modifier.width(8.dp))
                 Text(
                     when (state.phase) {
-                        OotdPhase.UPLOADING -> "图片上传中…"
+                        OotdPhase.PREPARING -> "正在处理图片…"
                         OotdPhase.STREAMING -> "AI 正在分析…"
                         OotdPhase.DONE -> "重新分析"
                         OotdPhase.FAILED -> "重试分析"
@@ -520,16 +528,16 @@ fun OotdAnalyzeScreen(
                 )
             }
 
-            // ④ 上传中状态
-            if (state.phase == OotdPhase.UPLOADING) {
+            // ④ 图片处理中
+            if (state.phase == OotdPhase.PREPARING) {
                 StatusCard {
                     CircularProgressIndicator(modifier = Modifier.size(26.dp), strokeWidth = 2.5.dp)
                     Spacer(Modifier.width(12.dp))
-                    Text("正在压缩并上传图片，请稍候…")
+                    Text("正在处理所选图片，请稍候…")
                 }
             }
 
-            // ⑤ 失败状态：上传失败 / 网络异常 / 超时，页面内提示不崩溃
+            // ⑤ 失败状态：图片处理失败 / 网络异常 / 超时，页面内提示不崩溃
             if (state.phase == OotdPhase.FAILED) {
                 FailureCard(state.errorKind, state.errorMessage)
             }
@@ -596,12 +604,12 @@ private fun StatusCard(content: @Composable () -> Unit) {
     }
 }
 
-/** 失败卡：上传失败（琥珀色）与网络 / 超时（红色）两种视觉，文案直接展示后端 / 网络原因 */
+/** 失败卡：图片处理失败（琥珀色）与网络 / 超时（红色）两种视觉，文案直接展示后端 / 网络原因 */
 @Composable
 private fun FailureCard(kind: OotdErrorKind?, message: String?) {
-    val isUpload = kind == OotdErrorKind.UPLOAD
-    val container = if (isUpload) Color(0xFFFFF4E5) else Color(0xFFFFEDEA)
-    val accent = if (isUpload) Color(0xFFB26A00) else Color(0xFFBA1A1A)
+    val isImageError = kind == OotdErrorKind.IMAGE
+    val container = if (isImageError) Color(0xFFFFF4E5) else Color(0xFFFFEDEA)
+    val accent = if (isImageError) Color(0xFFB26A00) else Color(0xFFBA1A1A)
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -610,14 +618,19 @@ private fun FailureCard(kind: OotdErrorKind?, message: String?) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    if (isUpload) Icons.Filled.UploadFile else Icons.Filled.CloudOff,
+                    if (isImageError) Icons.Filled.UploadFile else Icons.Filled.CloudOff,
                     contentDescription = null,
                     tint = accent,
                     modifier = Modifier.size(20.dp),
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    if (isUpload) "上传失败" else "网络异常",
+                    when (kind) {
+                        OotdErrorKind.IMAGE -> "图片处理失败"
+                        OotdErrorKind.SERVER -> "分析失败"
+                        OotdErrorKind.TIMEOUT -> "分析超时"
+                        else -> "网络异常"
+                    },
                     fontWeight = FontWeight.Bold,
                     color = accent,
                 )

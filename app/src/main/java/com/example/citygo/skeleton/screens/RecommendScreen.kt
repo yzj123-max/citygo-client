@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -27,6 +29,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.TravelExplore
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -63,6 +66,7 @@ import com.example.citygo.skeleton.data.repository.CITY_ALL
 import com.example.citygo.skeleton.recommend.SpotCard
 import com.example.citygo.skeleton.recommend.SpotCardSkeleton
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CircularProgressIndicator
@@ -85,6 +89,7 @@ import com.example.citygo.skeleton.recommend.AttractionLocationControl
  * @param recommendViewModel Activity 作用域共享的推荐 ViewModel（由 SkeletonApp 注入）
  */
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun RecommendScreen(
     onSpotClick: (String) -> Unit,
     onSearch: (String) -> Unit,
@@ -94,73 +99,83 @@ fun RecommendScreen(
     onOpenOutfit: () -> Unit = {},
     petFriendly: Boolean = false,
     onPetFriendlyChange: (Boolean) -> Unit = {},
+    currentTrip: com.example.citygo.skeleton.data.model.TripPlan? = null,
+    onViewPlan: () -> Unit = {},
+    weatherLabel: String = "天气",
+    weatherCity: String = "",
+    onOpenWeather: () -> Unit = {},
 ) {
     val uiState by recommendViewModel.uiState.collectAsStateWithLifecycle()
+    val tripHero = currentTrip?.takeIf {
+        com.example.citygo.skeleton.data.normalizeDiscoveryCity(it.city) ==
+            com.example.citygo.skeleton.data.normalizeDiscoveryCity(uiState.currentCity)
+    }?.allPlaces?.firstOrNull { it.placeType == com.example.citygo.skeleton.data.model.PlaceType.SPOT &&
+        !it.mockedCoord && !it.coverUrl.isNullOrBlank() }
+    val heroName = uiState.heroSpotName ?: tripHero?.name
     // 首页搜索框输入（跳转后由搜索结果页接管关键词）
     var keyword by remember { mutableStateOf("") }
     // 全国城市搜索覆盖页开关
     var showCitySearch by remember { mutableStateOf(false) }
     var showNearbyLocation by remember { mutableStateOf(false) }
+    var showFilters by remember { mutableStateOf(false) }
+    var showSearch by remember { mutableStateOf(false) }
+    var draftCategory by remember { mutableStateOf<String?>(null) }
+    var draftTicket by remember { mutableStateOf<String?>(null) }
+    var draftPet by remember { mutableStateOf<String?>(null) }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+      // Keep half the visible page for the artwork, excluding the planner overlap.
+      val heroHeight = (maxHeight * .5f + 28.dp).coerceAtLeast(300.dp)
       LazyColumn(
           modifier = Modifier.fillMaxSize(),
-          contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 24.dp),
-          verticalArrangement = Arrangement.spacedBy(14.dp),
+          contentPadding = PaddingValues(bottom = 24.dp),
+          verticalArrangement = Arrangement.spacedBy(10.dp),
       ) {
           item(key = "intro") {
-              com.example.citygo.ui.theme.DiscoveryIntro(
-                  city = uiState.currentCity, petFriendly = petFriendly,
-                  onPetFriendlyChange = onPetFriendlyChange,
+              com.example.citygo.ui.theme.FidelityDiscovery(
+                  city = uiState.currentCity, photo = uiState.heroPhotoUrl ?: tripHero?.coverUrl,
+                  photoLabel = heroName?.let { "${uiState.currentCity.takeUnless { city -> city == CITY_ALL }?.let { city -> "$city · " }.orEmpty()}$it" },
+                  petFriendly = petFriendly, onPetChange = onPetFriendlyChange,
+                  onCity = { showCitySearch = true },
+                  weather = if (uiState.currentCity.removeSuffix("市") == weatherCity.removeSuffix("市")) weatherLabel else "天气",
+                  onWeather = onOpenWeather,
                   onPlan = { onPlan(uiState.currentCity) }, onOutfit = onOpenOutfit,
                   onNearby = { showNearbyLocation = true },
-                  heroPhoto = uiState.spots.firstOrNull()?.coverImg,
+                  currentTrip = currentTrip?.takeUnless { it.isEmpty }?.let { "${it.city} · ${it.totalDays} 天" },
+                  onViewPlan = onViewPlan,
+                  heroHeight = heroHeight,
               )
           }
-          item(key = "search") {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                  CitySelectorDropdown(uiState.currentCity, uiState.cities,
-                      recommendViewModel::selectCity, { showCitySearch = true })
-                  Spacer(Modifier.width(8.dp))
-                  HomeSearchBar(keyword, { keyword = it }, { query ->
-                      val text = query.trim()
-                      if (text.isNotEmpty()) {
-                          val city = recommendViewModel.matchCityKeyword(text)
-                          if (city != null) { keyword = ""; recommendViewModel.selectCity(city) }
-                          else { recommendViewModel.submitSearch(text); onSearch(text) }
-                      }
-                  }, Modifier.weight(1f))
-              }
-          }
           item(key = "section") {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                  Text("为你精选", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                  TextButton(onClick = recommendViewModel::refresh) { Text("刷新") }
-              }
-              Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                  FilterChip(uiState.source != "NEARBY", { recommendViewModel.selectCity(uiState.currentCity) }, { Text("城市推荐") })
-                  FilterChip(uiState.source == "NEARBY", { showNearbyLocation = !showNearbyLocation }, { Text("附近精选 · 20公里") })
-              }
-          }
-          if (showNearbyLocation) item(key = "location") {
-              AttractionLocationControl(autoStart = true) { fix ->
-                  recommendViewModel.showNearby(fix.longitude, fix.latitude)
-                  showNearbyLocation = false
-              }
-          }
-          if (uiState.source != "NEARBY") item(key = "filters") {
-              Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                  listOf(null to "全部分类", "110202" to "国家级景点", "110205" to "寺庙道观").forEach { (code, label) ->
-                      FilterChip(uiState.categoryCode == code,
-                          { recommendViewModel.setFilters(code, uiState.ticketStatus, uiState.petPolicy) }, { Text(label) })
+              Row(Modifier.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                  Text(if (uiState.source == "NEARBY") "附近精选" else if (uiState.source == "CITY_SEARCH") "${uiState.currentCity} · 城市景点"
+                      else if (uiState.currentCity == CITY_ALL) "为你精选" else "${uiState.currentCity} · 为你精选",
+                      style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                  IconButton(onClick = { showSearch = !showSearch }, modifier = Modifier.size(36.dp)) {
+                      Icon(Icons.Filled.Search, "搜索景点", Modifier.size(20.dp))
                   }
-                  FilterChip(uiState.ticketStatus == "FREE",
-                      { recommendViewModel.setFilters(uiState.categoryCode, if (uiState.ticketStatus == "FREE") null else "FREE", uiState.petPolicy) }, { Text("已核实免费") })
-                  FilterChip(uiState.petPolicy == "ALLOWED",
-                      { recommendViewModel.setFilters(uiState.categoryCode, uiState.ticketStatus, if (uiState.petPolicy == "ALLOWED") null else "ALLOWED") }, { Text("已核实允许携宠") })
-                  FilterChip(uiState.petPolicy == "CONDITIONAL",
-                      { recommendViewModel.setFilters(uiState.categoryCode, uiState.ticketStatus, if (uiState.petPolicy == "CONDITIONAL") null else "CONDITIONAL") }, { Text("有条件携宠") })
+                  IconButton(onClick = {
+                      draftCategory = uiState.categoryCode; draftTicket = uiState.ticketStatus; draftPet = uiState.petPolicy
+                      showFilters = true
+                  }, modifier = Modifier.size(36.dp)) {
+                      Icon(androidx.compose.material.icons.Icons.Outlined.Tune, "筛选景点", Modifier.size(20.dp))
+                  }
               }
+          }
+          if (uiState.source == "CITY_SEARCH") item(key = "city-results-note") {
+              Text("开放时间与携宠规则以景点详情为准",
+                  style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  modifier = Modifier.padding(horizontal = 14.dp))
+          }
+          if (showSearch) item(key = "search") {
+              HomeSearchBar(keyword, { keyword = it }, { query ->
+                  val text = query.trim()
+                  if (text.isNotEmpty()) {
+                      val city = recommendViewModel.matchCityKeyword(text)
+                      if (city != null) { keyword = ""; recommendViewModel.selectCity(city) }
+                      else { onSearch(text) }
+                  }
+              }, Modifier.fillMaxWidth().padding(horizontal = 14.dp))
           }
           when {
               uiState.loading -> items(SKELETON_CARD_COUNT) { SpotCardSkeleton() }
@@ -176,13 +191,14 @@ fun RecommendScreen(
                   }
               }
               else -> {
-                  item(key = "count") {
-                      Text("${uiState.currentCity} · 已加载 ${uiState.spots.size} 个地点", style = MaterialTheme.typography.labelMedium,
-                          color = MaterialTheme.colorScheme.onSurfaceVariant)
-                  }
-                  items(uiState.spots, key = { it.spotId }) { spot ->
-                      LaunchedEffect(spot.spotId) { recommendViewModel.ensurePhoto(spot.spotId) }
-                      SpotCard(spot = spot, onClick = { onSpotClick(spot.spotId) })
+                  items(uiState.spots.chunked(2), key = { it.first().spotId }) { pair ->
+                      Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                          pair.forEach { spot ->
+                              LaunchedEffect(spot.spotId) { recommendViewModel.ensurePhoto(spot.spotId) }
+                              com.example.citygo.ui.theme.DiscoverySpotTile(spot, Modifier.weight(1f)) { onSpotClick(spot.spotId) }
+                          }
+                          if (pair.size == 1) Spacer(Modifier.weight(1f))
+                      }
                   }
                   item(key = "pagination") {
                       Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -196,6 +212,53 @@ fun RecommendScreen(
           }
       }
 
+      if (showFilters) androidx.compose.material3.ModalBottomSheet(
+          onDismissRequest = { showFilters = false },
+          sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+      ) {
+          Column(Modifier.fillMaxWidth().navigationBarsPadding().verticalScroll(rememberScrollState())
+              .padding(horizontal = 20.dp).padding(bottom = 24.dp),
+              verticalArrangement = Arrangement.spacedBy(12.dp)) {
+              Text("精选筛选", style = MaterialTheme.typography.titleLarge)
+              Text("城市范围", style = MaterialTheme.typography.titleSmall)
+              Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                  FilterChip(uiState.source != "NEARBY", {
+                      recommendViewModel.selectCity(uiState.currentCity); showFilters = false
+                  }, { Text("城市推荐") })
+                  FilterChip(uiState.source == "NEARBY", {
+                      showFilters = false; showNearbyLocation = true
+                  }, { Text("附近 · 20公里") })
+              }
+              Text("景点类别", style = MaterialTheme.typography.titleSmall)
+              Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                  listOf(null to "全部", "110202" to "国家级景点", "110205" to "寺庙道观").forEach { (key, title) ->
+                      FilterChip(draftCategory == key, { draftCategory = key }, { Text(title) })
+                  }
+              }
+              Text("出行偏好", style = MaterialTheme.typography.titleSmall)
+              FilterChip(draftTicket == "FREE", { draftTicket = if (draftTicket == "FREE") null else "FREE" }, { Text("已核实免费") })
+              Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                  FilterChip(draftPet == "ALLOWED", { draftPet = if (draftPet == "ALLOWED") null else "ALLOWED" }, { Text("允许携宠 · 已核实") })
+                  FilterChip(draftPet == "CONDITIONAL", { draftPet = if (draftPet == "CONDITIONAL") null else "CONDITIONAL" }, { Text("有条件携宠") })
+              }
+              Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                  androidx.compose.material3.OutlinedButton(onClick = { draftCategory = null; draftTicket = null; draftPet = null },
+                      modifier = Modifier.weight(1f)) { Text("重置") }
+                  androidx.compose.material3.Button(onClick = {
+                      recommendViewModel.setFilters(draftCategory, draftTicket, draftPet); showFilters = false
+                  }, modifier = Modifier.weight(2f)) { Text("确定筛选") }
+              }
+              TextButton(onClick = { recommendViewModel.refresh(); showFilters = false }) { Text("刷新精选内容") }
+          }
+      }
+      if (showNearbyLocation) androidx.compose.material3.ModalBottomSheet(onDismissRequest = { showNearbyLocation = false }) {
+          Column(Modifier.fillMaxWidth().padding(20.dp)) {
+              Text("发现附近灵感", style = MaterialTheme.typography.titleLarge)
+              AttractionLocationControl(autoStart = true) { fix ->
+                  recommendViewModel.showNearby(fix.longitude, fix.latitude); showNearbyLocation = false
+              }
+          }
+      }
       // 全国城市搜索覆盖页：支持汉字 / 全拼 / 首字母 / adCode，选中城市后刷新推荐
       if (showCitySearch) {
           RecommendCitySearchOverlay(

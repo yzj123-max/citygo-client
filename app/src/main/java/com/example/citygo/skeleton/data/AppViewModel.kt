@@ -1616,6 +1616,45 @@ class AppViewModel(
 
     val tripSyncState: StateFlow<TripSyncUiState> = tripSync?.state ?: MutableStateFlow(TripSyncUiState())
 
+    private val _repairingLocations = MutableStateFlow(false)
+    val repairingLocations = _repairingLocations.asStateFlow()
+
+    fun repairPlanLocations() {
+        if (_repairingLocations.value || _travelTaskState.value is TravelTaskState.Submitting ||
+            _travelTaskState.value is TravelTaskState.Polling) return
+        val original = _currentTravelPlan.value
+        val session = AccountSession.snapshot()
+        val tripId = tripSyncState.value.activeTripId
+        _repairingLocations.value = true
+        viewModelScope.launch {
+            try {
+                val days = original.dailyPlans.map { day ->
+                    day.copy(places = day.places.map { place ->
+                        if (place.mockedCoord) {
+                            val repaired = guideSpotImporter.repairPlace(place, original.destination)
+                            delay(300)
+                            repaired
+                        } else place
+                    })
+                }
+                if (!AccountSession.isCurrent(session) || _currentTravelPlan.value != original ||
+                    tripSyncState.value.activeTripId != tripId) {
+                    _taskNoticeEvents.emit("当前行程已变化，请重新校准地点")
+                    return@launch
+                }
+                val updated = original.copy(dailyPlans = days, allPlaceList = days.flatMap { it.places })
+                repository.saveTravelPlan(updated)
+                _currentTravelPlan.value = updated
+                val remaining = updated.allPlaceList.count { it.mockedCoord }
+                _taskNoticeEvents.emit(if (remaining == 0) "行程地点位置已校准" else "仍有 $remaining 个地点未匹配，请核对地点名称")
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                Log.w(TAG, "校准地点失败", e)
+                _taskNoticeEvents.emit("暂时无法校准，原行程已保留")
+            } finally { _repairingLocations.value = false }
+        }
+    }
+
     fun retryTripSync() { tripSync?.retry() }
     fun selectSavedTrip(id: String) {
         if (_chatLoading.value || _travelTaskState.value is TravelTaskState.Submitting ||
